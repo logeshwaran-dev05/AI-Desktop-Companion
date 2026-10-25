@@ -5,13 +5,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-  "dev": "vite",
-  "build": "tsc -b && vite build",
-  "lint": "oxlint",
-  "preview": "vite preview",
-  "electron": "electron ./electron/main.cjs",
-  "app": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron ./electron/main.cjs\""
-},
+    "dev": "npm --prefix desktop run dev",
+    "build": "npm --prefix desktop run build",
+    "lint": "npm --prefix desktop run lint",
+    "preview": "npm --prefix desktop run preview",
+    "electron": "npm --prefix desktop run electron",
+    "app": "npm --prefix desktop run app"
+  },
   "devDependencies": {
     "concurrently": "^9.0.0",
     "electron": "^45.0.0",
