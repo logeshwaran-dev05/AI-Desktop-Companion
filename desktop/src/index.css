@@ -66,6 +66,21 @@ body {
   margin: 0;
 }
 
+:root.avatar-window-mode,
+html.avatar-window-mode,
+body.avatar-window-mode,
+body.avatar-window-mode #root {
+  background: transparent !important;
+  background-color: transparent !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+
 h1,
 h2 {
   font-family: var(--heading);
