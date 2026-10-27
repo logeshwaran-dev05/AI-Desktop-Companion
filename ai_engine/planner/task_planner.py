@@ -11,7 +11,7 @@ class TaskPlanner:
 
     def process_command(self, request: CommandRequest) -> PlannerResponse:
 
-        # Step 1: Get and clean user input
+        # Step 1: Clean user input
         user_input = request.text.strip()
 
         # Step 2: Handle empty input
@@ -22,12 +22,13 @@ class TaskPlanner:
                 steps=[],
                 requires_clarification=True,
                 clarification_question="Please enter a command.",
-                status="clarification_required"
+                status="clarification_required",
+                message="Command cannot be empty."
             )
 
         command = user_input.lower()
 
-        # Step 3: Identify general questions
+        # Step 3: Handle general questions
         question_words = (
             "what ", "why ", "how ",
             "when ", "where ", "who "
@@ -40,25 +41,18 @@ class TaskPlanner:
                 steps=[],
                 requires_clarification=False,
                 clarification_question=None,
-                status="plan_ready"
+                status="plan_ready",
+                message="General question identified."
             )
 
-        # Step 4: Identify application opening commands
-        action_words = ("open ", "launch ", "start ", "open")
+        # Step 4: Identify application-opening commands
+        parts = command.split(maxsplit=1)
+        action = parts[0]
 
-        if command.startswith(action_words):
+        if action in ("open", "launch", "start"):
 
-            # Extract application name safely
-            parts = user_input.split(maxsplit=1)
-
-            application = (
-                parts[1].strip()
-                if len(parts) > 1
-                else ""
-            )
-
-            # Step 5: Handle missing application
-            if not application:
+            # Step 5: Check application name
+            if len(parts) == 1 or not parts[1].strip():
                 return PlannerResponse(
                     intent="open_application",
                     entities=CommandEntities(),
@@ -67,13 +61,18 @@ class TaskPlanner:
                     clarification_question=(
                         "Which application would you like to open?"
                     ),
-                    status="clarification_required"
+                    status="clarification_required",
+                    message="Application name is missing."
                 )
 
-            # Step 6: Check supported applications
-            supported_applications = ["notepad"]
+            application = parts[1].strip()
 
-            if application.lower() not in supported_applications:
+            # Step 6: Check supported applications
+            supported_applications = {
+                "notepad": "Notepad"
+            }
+
+            if application not in supported_applications:
                 return PlannerResponse(
                     intent="open_application",
                     entities=CommandEntities(
@@ -82,40 +81,48 @@ class TaskPlanner:
                     steps=[],
                     requires_clarification=False,
                     clarification_question=None,
-                    status="unsupported"
+                    status="unsupported",
+                    message=(
+                        f"{application} is not currently supported."
+                    )
                 )
 
             # Step 7: Generate structured plan
+            application_name = supported_applications[application]
+
             return PlannerResponse(
                 intent="open_application",
                 entities=CommandEntities(
-                    application="Notepad"
+                    application=application_name
                 ),
                 steps=[
                     PlanStep(
                         step_id=1,
                         action="open_application",
-                        target="Notepad",
+                        target=application_name,
                         depends_on=[],
                         expected_outcome=(
-                            "Notepad should open successfully."
+                            f"{application_name} should open successfully."
                         )
                     )
                 ],
                 requires_clarification=False,
                 clarification_question=None,
-                status="plan_ready"
+                status="plan_ready",
+                message=(
+                    f"{application_name} plan generated successfully."
+                )
             )
 
-        # Step 8: Handle unknown commands
+        # Step 8: Handle unsupported commands
         return PlannerResponse(
             intent="unknown",
             entities=CommandEntities(),
             steps=[],
-            requires_clarification=True,
-            clarification_question=(
-                "I could not understand your instruction. "
-                "Could you please explain what you want to do?"
-            ),
-            status="clarification_required"
+            requires_clarification=False,
+            clarification_question=None,
+            status="unsupported",
+            message=(
+                "This command is not currently supported."
+            )
         )
