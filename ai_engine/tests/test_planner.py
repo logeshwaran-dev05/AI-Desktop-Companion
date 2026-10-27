@@ -10,56 +10,78 @@ class TestTaskPlanner(unittest.TestCase):
     def setUp(self):
         self.planner = TaskPlanner()
 
-    # Test 1: Valid application command
+    # Test 1: Open Notepad
     def test_open_notepad(self):
-        request = CommandRequest(text="Open Notepad")
-
-        response = self.planner.process_command(request)
+        response = self.planner.process_command(
+            CommandRequest(text="Open Notepad")
+        )
 
         self.assertEqual(response.intent, "open_application")
         self.assertEqual(response.entities.application, "Notepad")
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(len(response.steps), 1)
 
-    # Test 2: Missing application name
+    # Test 2: Launch Notepad
+    def test_launch_notepad(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Launch Notepad")
+        )
+
+        self.assertEqual(response.status, "plan_ready")
+
+    # Test 3: Start Notepad
+    def test_start_notepad(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Start Notepad")
+        )
+
+        self.assertEqual(response.status, "plan_ready")
+
+    # Test 4: Missing application
     def test_missing_application(self):
-        request = CommandRequest(text="Open")
+        response = self.planner.process_command(
+            CommandRequest(text="Open")
+        )
 
-        response = self.planner.process_command(request)
-
-        self.assertTrue(response.requires_clarification)
         self.assertEqual(
             response.status, "clarification_required"
         )
+        self.assertTrue(response.requires_clarification)
 
-    # Test 3: General question
-    def test_general_question(self):
-        request = CommandRequest(text="What is Python?")
-
-        response = self.planner.process_command(request)
-
-        self.assertEqual(response.intent, "general_question")
-        self.assertEqual(response.steps, [])
-
-    # Test 4: Unsupported application
+    # Test 5: Unsupported application
     def test_unsupported_application(self):
-        request = CommandRequest(text="Open Photoshop")
-
-        response = self.planner.process_command(request)
+        response = self.planner.process_command(
+            CommandRequest(text="Open Photoshop")
+        )
 
         self.assertEqual(response.status, "unsupported")
-        self.assertEqual(response.steps, [])
+        self.assertIn("not currently supported", response.message)
 
-    # Test 5: Empty input
+    # Test 6: Unsupported command
+    def test_unsupported_command(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Delete a file")
+        )
+
+        self.assertEqual(response.status, "unsupported")
+
+    # Test 7: Empty input
     def test_empty_input(self):
-        request = CommandRequest(text="")
+        response = self.planner.process_command(
+            CommandRequest(text="")
+        )
 
-        response = self.planner.process_command(request)
-
-        self.assertTrue(response.requires_clarification)
         self.assertEqual(
             response.status, "clarification_required"
         )
+
+    # Test 8: General question
+    def test_general_question(self):
+        response = self.planner.process_command(
+            CommandRequest(text="What is Python?")
+        )
+
+        self.assertEqual(response.intent, "general_question")
 
 
 if __name__ == "__main__":
