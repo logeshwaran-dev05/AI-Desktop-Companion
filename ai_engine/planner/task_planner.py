@@ -1,4 +1,7 @@
 
+import re
+from difflib import SequenceMatcher
+
 from ai_engine.schemas.command_schema import (
     CommandRequest,
     CommandEntities,
@@ -11,8 +14,8 @@ class TaskPlanner:
 
     def process_command(self, request: CommandRequest) -> PlannerResponse:
 
-        # Step 1: Clean user input
-        user_input = request.text.strip()
+        # Step 1: Normalize input
+        user_input = " ".join(request.text.split()).lower()
 
         # Step 2: Handle empty input
         if not user_input:
@@ -26,15 +29,13 @@ class TaskPlanner:
                 message="Command cannot be empty."
             )
 
-        command = user_input.lower()
-
         # Step 3: Handle general questions
         question_words = (
             "what ", "why ", "how ",
             "when ", "where ", "who "
         )
 
-        if command.startswith(question_words):
+        if user_input.startswith(question_words):
             return PlannerResponse(
                 intent="general_question",
                 entities=CommandEntities(),
@@ -45,14 +46,20 @@ class TaskPlanner:
                 message="General question identified."
             )
 
-        # Step 4: Identify application-opening commands
-        parts = command.split(maxsplit=1)
-        action = parts[0]
+        # Step 4: Identify different command phrases
+        pattern = (
+            r"^(?:(?:please|can you|could you|would you)\s+)?"
+            r"(open|launch|start)\b\s*(.*)$"
+        )
 
-        if action in ("open", "launch", "start"):
+        match = re.match(pattern, user_input)
 
-            # Step 5: Check application name
-            if len(parts) == 1 or not parts[1].strip():
+        if match:
+            action = match.group(1)
+            application = match.group(2).strip()
+
+            # Step 5: Handle missing application name
+            if not application:
                 return PlannerResponse(
                     intent="open_application",
                     entities=CommandEntities(),
@@ -65,31 +72,66 @@ class TaskPlanner:
                     message="Application name is missing."
                 )
 
-            application = parts[1].strip()
-
-            # Step 6: Check supported applications
+            # Step 6: Supported applications
             supported_applications = {
                 "notepad": "Notepad"
             }
 
-            if application not in supported_applications:
-                return PlannerResponse(
-                    intent="open_application",
-                    entities=CommandEntities(
-                        application=application
-                    ),
-                    steps=[],
-                    requires_clarification=False,
-                    clarification_question=None,
-                    status="unsupported",
-                    message=(
-                        f"{application} is not currently supported."
-                    )
+            # Step 7: Exact or spelling-based matching
+            if application in supported_applications:
+                application_name = supported_applications[application]
+
+            else:
+                similarities = {
+                    name: SequenceMatcher(
+                        None,
+                        application.replace(" ", ""),
+                        name.replace(" ", "")
+                    ).ratio()
+                    for name in supported_applications
+                }
+
+                best_match = max(
+                    similarities,
+                    key=similarities.get
                 )
 
-            # Step 7: Generate structured plan
-            application_name = supported_applications[application]
+                confidence = similarities[best_match]
 
+                if confidence >= 0.85:
+                    application_name = supported_applications[best_match]
+
+                elif confidence >= 0.65:
+                    return PlannerResponse(
+                        intent="open_application",
+                        entities=CommandEntities(
+                            application=application
+                        ),
+                        steps=[],
+                        requires_clarification=True,
+                        clarification_question=(
+                            f"Did you mean {supported_applications[best_match]}?"
+                        ),
+                        status="clarification_required",
+                        message="Application name is uncertain."
+                    )
+
+                else:
+                    return PlannerResponse(
+                        intent="open_application",
+                        entities=CommandEntities(
+                            application=application
+                        ),
+                        steps=[],
+                        requires_clarification=False,
+                        clarification_question=None,
+                        status="unsupported",
+                        message=(
+                            f"{application} is not currently supported."
+                        )
+                    )
+
+            # Step 8: Generate structured plan
             return PlannerResponse(
                 intent="open_application",
                 entities=CommandEntities(
@@ -114,7 +156,7 @@ class TaskPlanner:
                 )
             )
 
-        # Step 8: Handle unsupported commands
+        # Step 9: Handle unsupported commands
         return PlannerResponse(
             intent="unknown",
             entities=CommandEntities(),
@@ -122,7 +164,5 @@ class TaskPlanner:
             requires_clarification=False,
             clarification_question=None,
             status="unsupported",
-            message=(
-                "This command is not currently supported."
-            )
+            message="This command is not currently supported."
         )
