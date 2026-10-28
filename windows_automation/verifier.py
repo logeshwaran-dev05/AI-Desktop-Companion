@@ -4,8 +4,7 @@ Truthful Windows application & window verifier.
 Distinguishes raw process creation from confirmed GUI window visibility.
 Uses Windows Win32 API (EnumWindows, GetWindowThreadProcessId, IsWindowVisible,
 GetWindowTextW, GetClassNameW) via ctypes.
-Accurately supports both traditional Win32 processes and modern Windows 10/11
-packaged app execution aliases (e.g. Notepad.exe UWP delegation).
+Accurately supports classic Win32 apps, modern packaged UWP apps, and background/tray apps.
 Never fabricates success or evidence.
 """
 
@@ -74,11 +73,10 @@ class WindowsWindowVerifier:
             # Match Condition 1: Direct PID match
             direct_pid_match = (window_pid.value == pid)
 
-            # Match Condition 2: App Alias match (Windows 11 packaged Notepad)
-            # Window class name is "Notepad" or title ends with "- Notepad" / "Notepad"
+            # Match Condition 2: Name / Class match for modern app aliases or multi-process browsers
             alias_match = False
-            if target_name_lower == "notepad":
-                if cls_name.lower() == "notepad" or "notepad" in title.lower():
+            if target_name_lower:
+                if target_name_lower in cls_name.lower() or target_name_lower in title.lower():
                     alias_match = True
 
             if direct_pid_match or alias_match:
@@ -88,7 +86,7 @@ class WindowsWindowVerifier:
                 found_info["window_class"] = cls_name
                 found_info["width"] = width
                 found_info["height"] = height
-                found_info["matched_via"] = "direct_pid" if direct_pid_match else "win32_app_alias"
+                found_info["matched_via"] = "direct_pid" if direct_pid_match else "win32_title_or_class"
                 return False  # stop enumeration
 
             return True
@@ -108,12 +106,28 @@ class WindowsWindowVerifier:
     ) -> VerificationEvidence:
         """
         Polls until the application window is confirmed visible or timeout expires.
-        Distinguishes process existence from verified window visibility.
+        Distinguishes confirmed window visibility from process-only readiness or failure.
         """
         start_time = time.monotonic()
         finder = self._finder_override or self._find_window_for_pid_native
 
         while (time.monotonic() - start_time) < timeout_seconds:
+            # Check if process terminated prematurely
+            if is_process_alive_check and not is_process_alive_check(pid):
+                return VerificationEvidence(
+                    verified=False,
+                    verification_status="launch_failed",
+                    method="win32_process_check",
+                    details={
+                        "process_id": pid,
+                        "process_name": process_name,
+                        "process_alive": False,
+                        "window_found": False,
+                        "reason": "Process terminated before its window became visible.",
+                    },
+                    evidence_timestamp=current_iso_timestamp(),
+                )
+
             # Check for visible window
             try:
                 window_details = finder(pid, process_name)
@@ -124,6 +138,7 @@ class WindowsWindowVerifier:
             if window_details is not None:
                 return VerificationEvidence(
                     verified=True,
+                    verification_status="launch_verified",
                     method="win32_window_enumeration",
                     details={
                         "process_id": pid,
@@ -145,14 +160,16 @@ class WindowsWindowVerifier:
 
             time.sleep(poll_interval)
 
-        # Timeout reached without window visibility confirmation
+        # Timeout reached
+        alive = is_process_alive_check(pid) if is_process_alive_check else True
         return VerificationEvidence(
             verified=False,
+            verification_status="timed_out",
             method="win32_window_enumeration_timeout",
             details={
                 "process_id": pid,
                 "process_name": process_name,
-                "process_alive": is_process_alive_check(pid) if is_process_alive_check else True,
+                "process_alive": alive,
                 "window_found": False,
                 "reason": f"Window failed to become visible within {timeout_seconds}s timeout deadline.",
             },

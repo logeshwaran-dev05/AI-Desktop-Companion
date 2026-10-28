@@ -1,13 +1,14 @@
 """
 Safe Windows Automation Executor.
 
-Executes allowlisted desktop actions (Notepad launch for Milestone 1) with:
+Executes allowlisted desktop actions (Notepad, discovered installed applications) with:
 1. Strict policy and authorization checking.
-2. Safe subprocess invocation (shell=False, no elevated privileges).
-3. Process tracking and active cancellation support.
-4. Duplicate request detection and idempotency enforcement.
-5. Windows window verification distinguishing process from UI visibility.
-6. Structured audit recording with sensitive data redaction.
+2. Dynamic target resolution against the ApplicationCatalogue.
+3. Safe subprocess invocation (shell=False, no elevated privileges).
+4. Process tracking and active cancellation support.
+5. Duplicate request detection and idempotency enforcement.
+6. Truthful Windows window & process verification.
+7. Structured audit recording with sensitive data redaction.
 """
 
 import os
@@ -18,11 +19,13 @@ from windows_automation.schemas import (
     ActionRequest,
     ExecutionResult,
     VerificationEvidence,
+    ApplicationRecord,
     current_iso_timestamp,
 )
 from windows_automation.policy import WindowsActionPolicy
 from windows_automation.verifier import WindowsWindowVerifier
 from windows_automation.audit import AuditLogger
+from windows_automation.catalogue import ApplicationCatalogue
 
 
 class WindowsAutomationExecutor:
@@ -33,15 +36,19 @@ class WindowsAutomationExecutor:
         policy: Optional[WindowsActionPolicy] = None,
         verifier: Optional[WindowsWindowVerifier] = None,
         audit_logger: Optional[AuditLogger] = None,
+        catalogue: Optional[ApplicationCatalogue] = None,
         subprocess_runner: Optional[Callable[..., Any]] = None,
     ):
-        self.policy = policy or WindowsActionPolicy()
+        self.catalogue = catalogue
+        self.policy = policy or WindowsActionPolicy(catalogue=self.catalogue)
+        if catalogue and not self.policy.catalogue:
+            self.policy.catalogue = catalogue
         self.verifier = verifier or WindowsWindowVerifier()
         self.audit_logger = audit_logger or AuditLogger()
         self._subprocess_runner = subprocess_runner or subprocess.Popen
 
-        # Active process tracker: action_id -> subprocess.Popen
-        self._active_processes: Dict[str, subprocess.Popen] = {}
+        # Active process tracker: action_id -> dict {"proc": proc, "window_pid": ...}
+        self._active_processes: Dict[str, Any] = {}
         # Idempotency cache: idempotency_key -> ExecutionResult
         self._idempotency_cache: Dict[str, ExecutionResult] = {}
         # Cancellation requested set: action_id
@@ -68,6 +75,7 @@ class WindowsAutomationExecutor:
                     action_id=request.action_id,
                     task_id=request.task_id,
                     status="failed",
+                    verification_status="launch_failed",
                     error_code="ERR_DUPLICATE_REQUEST",
                     error_message=f"Duplicate request detected for idempotency key '{request.idempotency_key}'.",
                     started_at=started_at,
@@ -75,7 +83,7 @@ class WindowsAutomationExecutor:
                     duration_ms=0,
                 )
 
-        # Step 2: Validate request format, action, and target
+        # Step 2: Validate request format, action, and target against policy and catalogue
         is_valid, err_code, err_msg = self.policy.validate_request(request)
         if not is_valid:
             self.audit_logger.log_event(
@@ -89,6 +97,7 @@ class WindowsAutomationExecutor:
                 action_id=request.action_id,
                 task_id=request.task_id,
                 status="failed",
+                verification_status="launch_failed",
                 error_code=err_code,
                 error_message=err_msg,
                 started_at=started_at,
@@ -110,6 +119,7 @@ class WindowsAutomationExecutor:
                 action_id=request.action_id,
                 task_id=request.task_id,
                 status="failed",
+                verification_status="denied",
                 error_code=auth_err_code,
                 error_message=auth_err_msg,
                 started_at=started_at,
@@ -118,12 +128,13 @@ class WindowsAutomationExecutor:
             )
 
         # Step 4: Resolve verified executable path
-        executable_path = self.policy.resolve_executable_path(request.target)
+        executable_path = self.policy.resolve_executable_path(request.target, request=request)
         if not executable_path:
             return ExecutionResult(
                 action_id=request.action_id,
                 task_id=request.task_id,
                 status="failed",
+                verification_status="launch_failed",
                 error_code="ERR_LAUNCH_FAILED",
                 error_message=f"Could not resolve verified executable for target: '{request.target}'.",
                 started_at=started_at,
@@ -131,7 +142,7 @@ class WindowsAutomationExecutor:
                 duration_ms=int((time.monotonic() - start_time) * 1000),
             )
 
-        # Step 5: Check pre-launch cancellation
+        # Step 5: Check pre-launch cancellation checkpoint
         if request.action_id in self._cancelled_actions:
             self.audit_logger.log_event(
                 event_type="action_cancelled_pre_launch",
@@ -143,6 +154,7 @@ class WindowsAutomationExecutor:
                 action_id=request.action_id,
                 task_id=request.task_id,
                 status="cancelled",
+                verification_status="cancelled",
                 error_code="ERR_CANCELLED",
                 error_message="Action was cancelled before execution started.",
                 started_at=started_at,
@@ -186,6 +198,7 @@ class WindowsAutomationExecutor:
                 action_id=request.action_id,
                 task_id=request.task_id,
                 status="failed",
+                verification_status="launch_failed",
                 error_code="ERR_LAUNCH_FAILED",
                 error_message=f"Process launch failed: {str(exc)}",
                 started_at=started_at,
@@ -193,7 +206,7 @@ class WindowsAutomationExecutor:
                 duration_ms=int((time.monotonic() - start_time) * 1000),
             )
 
-        # Step 7: Check post-launch cancellation
+        # Step 7: Check post-launch cancellation checkpoint
         if request.action_id in self._cancelled_actions:
             self._terminate_process(proc)
             self._active_processes.pop(request.action_id, None)
@@ -201,6 +214,7 @@ class WindowsAutomationExecutor:
                 action_id=request.action_id,
                 task_id=request.task_id,
                 status="cancelled",
+                verification_status="cancelled",
                 error_code="ERR_CANCELLED",
                 error_message="Action was cancelled immediately following process launch.",
                 started_at=started_at,
@@ -226,12 +240,11 @@ class WindowsAutomationExecutor:
 
         # Step 9: Evaluate verification outcome
         if not evidence.verified:
-            # Process may have started, but window did not appear or timed out
-            # Clean up the unverified process to prevent orphans
+            # Clean up unverified process
             self._terminate_process(proc)
             self._active_processes.pop(request.action_id, None)
 
-            err_code = "ERR_TIMEOUT" if "timeout" in evidence.method else "ERR_VERIFICATION_FAILED"
+            err_code = "ERR_TIMEOUT" if (evidence.verification_status == "timed_out" or "timeout" in evidence.method) else "ERR_VERIFICATION_FAILED"
             reason = evidence.details.get("reason", "Application window verification failed.")
 
             self.audit_logger.log_event(
@@ -242,18 +255,19 @@ class WindowsAutomationExecutor:
                 details=evidence.details,
             )
 
-            result = ExecutionResult(
+            return ExecutionResult(
                 action_id=request.action_id,
                 task_id=request.task_id,
                 status="failed",
+                verification_status=evidence.verification_status,
                 error_code=err_code,
                 error_message=reason,
                 started_at=started_at,
                 completed_at=completed_at,
                 duration_ms=duration_ms,
                 verification=evidence,
+                resolved_record=request.resolved_record,
             )
-            return result
 
         # Success - Confirmed process and window ready
         window_pid = evidence.details.get("window_pid")
@@ -279,12 +293,14 @@ class WindowsAutomationExecutor:
             action_id=request.action_id,
             task_id=request.task_id,
             status="completed",
+            verification_status="launch_verified",
             error_code=None,
             error_message=None,
             started_at=started_at,
             completed_at=completed_at,
             duration_ms=duration_ms,
             verification=evidence,
+            resolved_record=request.resolved_record,
             audit=audit_record,
         )
 

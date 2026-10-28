@@ -1,104 +1,156 @@
-# Windows Automation — Safe Actions & Verification
+# Windows Automation — Installed Application Discovery & Safe Launch
 
 **Created by:** Logeshwaran D (Windows Automation — Safe Actions & Verification, JM Vertex Technologies)  
 **Module:** `windows_automation`  
-**Milestone:** Milestone 1 — Validated & Verified "Open Notepad" Launch  
+**Milestone:** Complete 27–30 October 2026 Tasks (Discovery, Catalogue Resolution, Safe Launch & Verification)  
 **Repository:** `https://github.com/Vinayvighnesh2008/AI-Desktop-Companion`
 
 ---
 
 ## 1. Overview & Architecture
 
-The `windows_automation` module provides a hardened, secure execution layer for Windows desktop automation. It bridges AI-generated action plans and backend tasks with the physical operating system while guaranteeing safety, explicit allowlisting, and verifiable execution outcomes.
+The `windows_automation` module provides an auditable, secure execution and discovery layer for Windows desktop automation. It discovers installed Windows software across trusted sources, indexes them into a safe application catalogue, and executes controlled application launches with Win32 verification and strict security policy gating.
 
-### Architecture Components
-
-1. **`schemas.py`**:
-   - `ActionRequest`: Strongly typed action payload with task IDs, bounded timeouts, and security authorization metadata.
-   - `AuthorizationDecision`: Explicit permission and user approval record.
-   - `VerificationEvidence`: Truthful process and window visibility evidence.
-   - `ExecutionResult`: Structured outcome returned to caller.
-   - `AuditRecord`: Redacted security audit trail event.
-
-2. **`policy.py` (`WindowsActionPolicy`)**:
-   - Explicit application allowlist (`Notepad` / `notepad.exe` in Milestone 1).
-   - Strict rejection of arbitrary executable paths, shell scripts, directory traversal, and command chaining tokens (`;`, `&`, `|`, `powershell`, `cmd.exe`).
-   - Permission verification: Never invents approvals. Disallows execution if permissions are missing or denied.
-
-3. **`verifier.py` (`WindowsWindowVerifier`)**:
-   - Distinguishes raw process creation from verified GUI window readiness.
-   - Uses native Windows Win32 API (`EnumWindows`, `GetWindowThreadProcessId`, `IsWindowVisible`, `GetWindowTextW`, `GetClassNameW` via `ctypes`).
-   - Accurately supports both traditional Win32 processes and modern Windows 10/11 packaged UWP App Execution Aliases (where the spawned stub delegates to the packaged Notepad process).
-   - Never fabricates verification evidence.
-
-4. **`executor.py` (`WindowsAutomationExecutor`)**:
-   - Safe subprocess execution using `subprocess.Popen(..., shell=False)`.
-   - Process tracking and cancellation support (`cancel(action_id)` cleanly terminates spawned processes and verifies exit).
-   - Duplicate request detection using idempotency keys (`ERR_DUPLICATE_REQUEST`).
-   - Clean cleanup on verification timeout to prevent orphaned/zombie processes.
-
-5. **`audit.py` (`AuditLogger`)**:
-   - Records structured lifecycle events for every action.
-   - Automatic redaction of sensitive tokens, credentials, passwords, and bearer tokens.
-   - Strictly does NOT take screenshots or capture clipboard data.
-
-6. **`adapter.py` (`WindowsAutomationAdapter`)**:
-   - Narrow compatibility adapter connecting Booviha's `ai_engine.schemas.command_schema.PlanStep` or raw dictionaries to the Windows executor.
+```
+[ User Input / AI Planner ]
+             │
+             ▼
+   [ Application Query ]
+             │
+             ▼
+┌─────────────────────────┐
+│   ApplicationDiscoverer │  Discovers apps from Registry, Start Menu (.lnk), and built-ins.
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│   ApplicationCatalogue  │  Indexes records, resolves names/aliases/IDs, handles ambiguity.
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│   WindowsActionPolicy   │  Enforces allowlist, blocks arbitrary shell scripts, verifies auth.
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ WindowsAutomationExecutor│ Spawns process (shell=False), tracks PID, enforces cancellation.
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│  WindowsWindowVerifier  │  Win32 EnumWindows / GetWindowThreadProcessId verification.
+└─────────────────────────┘
+```
 
 ---
 
-## 2. Supported Actions (Milestone 1)
+## 2. Supported Discovery Sources
 
-| Action Name | Target | Parameters | Description |
-|---|---|---|---|
-| `open_application` | `"Notepad"` / `"notepad.exe"` | `args: []` | Launches allowlisted Windows Notepad and verifies top-level window visibility. |
-
-*Any other action name or unallowlisted target (e.g., `calc.exe`, `cmd.exe`, `explorer.exe`) is rejected with `ERR_UNSUPPORTED_ACTION` or `ERR_TARGET_NOT_ALLOWLISTED`.*
+The discovery engine (`ApplicationDiscoverer`) scans only reviewable, trusted Windows sources:
+1. **Windows System Built-ins:** Core system utilities (`Notepad`, `Calculator`, `Paint`).
+2. **Current-User Start Menu Shortcuts:** `%APPDATA%\Microsoft\Windows\Start Menu\Programs` (resolved via pure Python binary `.lnk` Shell Link parsing).
+3. **All-Users Start Menu Shortcuts:** `%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs`.
+4. **Windows Registry (Installed Software):**
+   - `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall`
+   - `HKLM\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall`
+   - `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall`
 
 ---
 
-## 3. Permission & Safety Rules
+## 3. Catalogue Fields & Identifier Format
+
+Every application record (`ApplicationRecord`) contains:
+- **`app_id`**: Deterministic slug identifier (e.g. `app_google_chrome`, `app_notepad`, `app_microsoft_edge`).
+- **`display_name`**: Official human-readable application name (e.g. `"Google Chrome"`).
+- **`normalized_name`**: Normalized lowercase search string (e.g. `"google chrome"`).
+- **`executable_path`**: Validated filesystem path to target `.exe` or system binary.
+- **`source`**: Discovery origin (`"system_builtin"`, `"start_menu_user"`, `"start_menu_all_users"`, `"registry"`).
+- **`status`**: `"available"` (executable verified on disk) or `"target_missing"`.
+- **`version` / `publisher` / `icon_path`**: Optional trustworthy metadata.
+- **`aliases`**: Alternate search keywords (e.g. `["chrome", "google chrome"]`).
+
+---
+
+## 4. Target Resolution & Validation
+
+The `ApplicationCatalogue.resolve(query)` method provides deterministic disambiguation:
+- **Exact Matches:** Direct match against `app_id`, `normalized_name`, or exact alias → `"resolved"`.
+- **Ambiguous Matches:** If a query matches multiple applications (e.g. "Visual Studio" matching both VS and VS Code) → `"ambiguous"` with candidate list.
+- **Missing Applications:** Query not found → `"not_found"`.
+- **Pre-Launch Validation:** Immediately before execution, the executor verifies that the target executable exists and has a permitted `.exe` extension. Prohibits scripts (`.bat`, `.cmd`, `.ps1`, `.vbs`, `.sh`) and raw shell strings.
+
+---
+
+## 5. Security & Permission Enforcement
 
 1. **Authorization Gate:** An action cannot execute without an `AuthorizationDecision` having `permission_status="granted"`.
-2. **Approval Enforcement:** If `requires_user_approval=True`, an `approval_reference` must be provided. Missing approvals fail with `ERR_MISSING_APPROVAL`.
-3. **No Elevated Privileges:** Processes are spawned under user privileges without elevation or unrestricted shell execution.
-4. **No Destructive Retries:** Failed or cancelled actions are never retried automatically.
-5. **Deduplication:** Repeated requests with identical idempotency keys are blocked to prevent duplicate window spawns.
+2. **Approval Enforcement:** If `requires_user_approval=True`, a valid `approval_reference` must be provided.
+3. **No Shell Invocations:** All executions use `subprocess.Popen(..., shell=False)` without elevated admin privileges.
+4. **Idempotency & Duplicate Prevention:** Identical requests within a task lifecycle are deduplicated (`ERR_DUPLICATE_REQUEST`).
+5. **Pre & Post-Launch Cancellation:** Cancelling an action terminates the spawned process (including child app alias PIDs) and confirms termination.
 
 ---
 
-## 4. Setup & Dependencies
+## 6. Truthful Launch Verification
 
-- **Operating System:** Windows 10 / Windows 11 (64-bit).
-- **Python Version:** Python 3.10+ (tested with Python 3.11.9).
-- **External Dependencies:** Zero required third-party packages for core execution (built entirely on Python standard library: `ctypes`, `subprocess`, `dataclasses`, `time`, `re`).
+The `WindowsWindowVerifier` verifies execution outcomes using native Windows Win32 APIs (`EnumWindows`, `GetWindowThreadProcessId`, `IsWindowVisible`, `GetWindowTextW`, `GetClassNameW` via `ctypes`):
+- **`launch_verified`:** Process is running AND top-level GUI window handle (`HWND`) confirmed visible.
+- **`verification_inconclusive`:** Process running, but window not detected within deadline.
+- **`timed_out`:** Verification deadline expired and process terminated.
+- **`launch_failed`:** Process exited or crashed immediately after launch.
+- **`cancelled` / `denied`:** Aborted at authorization or cancellation checkpoint.
 
 ---
 
-## 5. Running Tests
+## 7. Setup & Dependencies
 
-The test suite separates mocked unit tests from real Windows integration tests:
+- **Platform:** Windows 10 / Windows 11 (64-bit).
+- **Python Version:** Python 3.10+ (tested on Python 3.11.9).
+- **Dependencies:** Built entirely on Python standard library (`ctypes`, `winreg`, `struct`, `subprocess`, `dataclasses`, `time`). Zero third-party dependencies required.
 
-### A. Run Mocked Unit Tests (10/10 Core Scenarios)
-Tests execution, timeouts, cancellations, permissions, and redaction in an isolated mocked environment:
-```powershell
-python -m unittest windows_automation/tests/test_windows_automation_mocked.py
-```
+---
 
-### B. Run Live Windows Integration Tests
-Tests real Notepad launch, Win32 window verification, and process cleanup on Windows:
-```powershell
-python -m unittest windows_automation/tests/test_windows_automation_live.py
-```
+## 8. Test Execution & Coverage
 
-### C. Run All Tests
+### Run All 25 Tests (Mocked & Live)
 ```powershell
 python -m unittest discover -s windows_automation/tests
 ```
 
----
+### Run Mocked Unit Tests (19 Tests)
+```powershell
+python -m unittest -v windows_automation/tests/test_windows_automation_mocked.py
+```
+Covers:
+1. Discovery across sources.
+2. Duplicate entry handling.
+3. Inaccessible/missing discovery directories.
+4. Empty catalogue vs failure.
+5. Valid target resolution.
+6. Ambiguous and missing target resolution.
+7. Controlled launch.
+8. Launch failure handling.
+9. Permission denied.
+10. Missing approval.
+11. Pre-launch cancellation.
+12. Post-launch cancellation.
+13. Duplicate request deduplication.
+14. Timeout handling.
+15. Verification success.
+16. Verification failure/inconclusive evidence.
+17. Rejection of arbitrary shell commands.
+18. Audit log credential redaction.
+19. Regression tests for existing AI Planner PlanStep.
 
-## 6. Known Limitations & Future Work
-
-- **Scope:** Milestone 1 is intentionally scoped to `"open_application"` with `"Notepad"`. Browser automation, shell scripts, and keyboard/mouse injection are intentionally disabled until team review.
-- **Contract Agreement:** Pending final review of `shared/TEAM_CONTRACTS.md` with Vinay Vighnesh S (Desktop Integration Lead) and Hariram K S (Backend API Owner).
+### Run Live Windows Integration Tests (6 Tests)
+```powershell
+python -m unittest -v windows_automation/tests/test_windows_automation_live.py
+```
+Covers:
+1. Real Windows application discovery (scans actual Registry & Start Menu).
+2. Live catalogue resolution.
+3. Real Notepad launch and Win32 window detection.
+4. Controlled launch via catalogue record.
+5. Rejection of dangerous shell command targets.
+6. End-to-end integration with Booviha's `ai_engine.schemas.command_schema.PlanStep`.
