@@ -87,6 +87,40 @@ class TestTaskPlanner(unittest.TestCase):
             CommandRequest(text="Open notep")
         )
         self.assertEqual(response.status, "clarification_required")
+    
+    def test_open_calculator(self):
+        result = self.planner.process_command(
+            CommandRequest(text="Open Calculator")
+        )
+        self.assertEqual(result.status, "plan_ready")
+        self.assertEqual(result.entities.application, "Calculator")
+
+    def test_open_chrome(self):
+        result = self.planner.process_command(
+            CommandRequest(text="Open Chrome")
+        )
+        self.assertEqual(result.status, "plan_ready")
+        self.assertEqual(result.entities.application, "Google Chrome")
+
+    def test_open_paint(self):
+        result = self.planner.process_command(
+            CommandRequest(text="Open Paint")
+        )
+        self.assertEqual(result.status, "plan_ready")
+        self.assertEqual(result.entities.application, "Paint")
+
+    def test_open_photoshop(self):
+        result = self.planner.process_command(
+            CommandRequest(text="Open Photoshop")
+        )
+        self.assertEqual(result.status, "unsupported")
+
+    def test_open_visual_studio_ambiguous(self):
+        result = self.planner.process_command(
+            CommandRequest(text="Open Visual Studio")
+        )
+        self.assertEqual(result.status, "clarification_required")
+
 
 
 if __name__ == "__main__":
