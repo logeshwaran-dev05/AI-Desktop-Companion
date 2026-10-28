@@ -1,4 +1,7 @@
 
+import re
+from difflib import SequenceMatcher
+
 from ai_engine.schemas.command_schema import (
     CommandRequest,
     CommandEntities,
@@ -6,13 +9,15 @@ from ai_engine.schemas.command_schema import (
     PlannerResponse
 )
 
+from ai_engine.catalogue import get_installed_apps
+
 
 class TaskPlanner:
 
     def process_command(self, request: CommandRequest) -> PlannerResponse:
 
-        # Step 1: Clean user input
-        user_input = request.text.strip()
+        # Step 1: Normalize input
+        user_input = " ".join(request.text.split()).lower()
 
         # Step 2: Handle empty input
         if not user_input:
@@ -26,15 +31,13 @@ class TaskPlanner:
                 message="Command cannot be empty."
             )
 
-        command = user_input.lower()
-
         # Step 3: Handle general questions
         question_words = (
             "what ", "why ", "how ",
             "when ", "where ", "who "
         )
 
-        if command.startswith(question_words):
+        if user_input.startswith(question_words):
             return PlannerResponse(
                 intent="general_question",
                 entities=CommandEntities(),
@@ -45,50 +48,162 @@ class TaskPlanner:
                 message="General question identified."
             )
 
-        # Step 4: Identify application-opening commands
-        parts = command.split(maxsplit=1)
-        action = parts[0]
+        # Step 4: Identify application launch commands
+        pattern = (
+            r"^(?:(?:please|can you|could you|would you)\s+)?"
+            r"(open|launch|start)\b\s*(.*)$"
+        )
 
-        if action in ("open", "launch", "start"):
+        match = re.match(pattern, user_input)
 
-            # Step 5: Check application name
-            if len(parts) == 1 or not parts[1].strip():
-                return PlannerResponse(
-                    intent="open_application",
-                    entities=CommandEntities(),
-                    steps=[],
-                    requires_clarification=True,
-                    clarification_question=(
-                        "Which application would you like to open?"
-                    ),
-                    status="clarification_required",
-                    message="Application name is missing."
+        if not match:
+            return PlannerResponse(
+                intent="unknown",
+                entities=CommandEntities(),
+                steps=[],
+                requires_clarification=False,
+                clarification_question=None,
+                status="unsupported",
+                message="This command is not currently supported."
+            )
+
+        application = match.group(2).strip()
+
+        # Step 5: Handle missing application name
+        if not application:
+            return PlannerResponse(
+                intent="open_application",
+                entities=CommandEntities(),
+                steps=[],
+                requires_clarification=True,
+                clarification_question=(
+                    "Which application would you like to open?"
+                ),
+                status="clarification_required",
+                message="Application name is missing."
+            )
+
+        # Step 6: Get installed application catalogue
+        installed_apps = get_installed_apps()
+
+        if not installed_apps:
+            return PlannerResponse(
+                intent="open_application",
+                entities=CommandEntities(
+                    application=application
+                ),
+                steps=[],
+                requires_clarification=False,
+                clarification_question=None,
+                status="unsupported",
+                message="No installed applications are available."
+            )
+
+        # Step 7: Normalize requested application name
+        requested_name = application.replace(" ", "").lower()
+
+        # Step 8: Calculate matching confidence
+        matches = []
+
+        for app in installed_apps:
+
+            app_name = app["app_name"]
+            app_id = app["app_id"]
+
+            normalized_name = app_name.replace(" ", "").lower()
+            normalized_id = app_id.replace(" ", "").lower()
+
+            name_score = SequenceMatcher(
+                None,
+                requested_name,
+                normalized_name
+            ).ratio()
+
+            id_score = SequenceMatcher(
+                None,
+                requested_name,
+                normalized_id
+            ).ratio()
+
+            confidence = max(name_score, id_score)
+
+            # Exact match
+            if requested_name in (
+                normalized_name,
+                normalized_id
+            ):
+                confidence = 1.0
+
+            matches.append({
+                "app": app,
+                "confidence": confidence
+            })
+
+        # Step 9: Sort matches by confidence
+        matches.sort(
+            key=lambda item: item["confidence"],
+            reverse=True
+        )
+
+        best_match = matches[0]
+        best_confidence = best_match["confidence"]
+
+        # Step 10: Detect multiple related application matches
+        related_matches = [
+            item for item in matches
+            if (
+                requested_name in (
+                    item["app"]["app_name"].replace(" ", "").lower()
                 )
-
-            application = parts[1].strip()
-
-            # Step 6: Check supported applications
-            supported_applications = {
-                "notepad": "Notepad"
-            }
-
-            if application not in supported_applications:
-                return PlannerResponse(
-                    intent="open_application",
-                    entities=CommandEntities(
-                        application=application
-                    ),
-                    steps=[],
-                    requires_clarification=False,
-                    clarification_question=None,
-                    status="unsupported",
-                    message=(
-                        f"{application} is not currently supported."
-                    )
+                or requested_name in (
+                    item["app"]["app_id"].replace(" ", "").lower()
                 )
+            )
+        ]
 
-            # Step 7: Generate structured plan
-            application_name = supported_applications[application]
+        possible_matches = [
+            item for item in matches
+            if item["confidence"] >= 0.65
+        ]
+
+        ambiguous_matches = []
+
+        if len(related_matches) > 1:
+            ambiguous_matches = related_matches
+
+        elif (
+            len(possible_matches) > 1
+            and possible_matches[1]["confidence"] >= best_confidence - 0.10
+        ):
+            ambiguous_matches = possible_matches
+
+        if ambiguous_matches:
+
+            app_names = [
+                item["app"]["app_name"]
+                for item in ambiguous_matches
+            ]
+
+            return PlannerResponse(
+                intent="open_application",
+                entities=CommandEntities(
+                    application=application
+                ),
+                steps=[],
+                requires_clarification=True,
+                clarification_question=(
+                    "Which application did you mean: "
+                    + " or ".join(app_names) + "?"
+                ),
+                status="clarification_required",
+                message="Multiple application matches found."
+            )
+
+        # Step 11: Accept high-confidence match
+        if best_confidence >= 0.85:
+
+            selected_app = best_match["app"]
+            application_name = selected_app["app_name"]
 
             return PlannerResponse(
                 intent="open_application",
@@ -110,19 +225,40 @@ class TaskPlanner:
                 clarification_question=None,
                 status="plan_ready",
                 message=(
-                    f"{application_name} plan generated successfully."
+                    f"{application_name} matched successfully."
                 )
             )
 
-        # Step 8: Handle unsupported commands
+        # Step 12: Ask clarification for medium confidence
+        elif best_confidence >= 0.65:
+
+            suggested_app = best_match["app"]["app_name"]
+
+            return PlannerResponse(
+                intent="open_application",
+                entities=CommandEntities(
+                    application=application
+                ),
+                steps=[],
+                requires_clarification=True,
+                clarification_question=(
+                    f"Did you mean {suggested_app}?"
+                ),
+                status="clarification_required",
+                message="Application name is uncertain."
+            )
+
+        # Step 13: Reject low-confidence match
         return PlannerResponse(
-            intent="unknown",
-            entities=CommandEntities(),
+            intent="open_application",
+            entities=CommandEntities(
+                application=application
+            ),
             steps=[],
             requires_clarification=False,
             clarification_question=None,
             status="unsupported",
             message=(
-                "This command is not currently supported."
+                f"{application} is not currently available."
             )
         )
