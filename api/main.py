@@ -17,7 +17,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from typing import Any, Dict, List, Optional
-from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, status
 
@@ -64,7 +63,7 @@ def health_check():
 # AI Planning Endpoint (Preserved and Enhanced)
 # ---------------------------------------------------------------------------
 
-@app.post("/plan")
+@app.post("/plan", response_model=PlanResponseModel)
 def create_plan(request: PlanRequest):
     """
     Process natural language command using TaskPlanner and return structured plan.
@@ -319,5 +318,5 @@ def run_command(request: CommandRunRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run(app, host="127.0.0.1", port=8000)
 
