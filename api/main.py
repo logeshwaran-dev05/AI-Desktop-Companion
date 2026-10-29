@@ -8,6 +8,14 @@ Exposes endpoints for:
 4. Task lifecycle management, orchestration, execution, approval, and cancellation (/tasks)
 """
 
+import sys
+from pathlib import Path
+
+# Add project root to sys.path so api/main.py can be run directly or imported from any working directory
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -185,7 +193,7 @@ def get_task_result(task_id: str):
 
 
 @app.post("/tasks/{task_id}/execute", response_model=TaskResultResponse)
-def execute_task(task_id: str, request: TaskExecuteRequest = TaskExecuteRequest()):
+def execute_task(task_id: str, request: Optional[TaskExecuteRequest] = None):
     """
     Execute a pending task through policy evaluation, automation dispatch, and verification.
     """
@@ -196,10 +204,11 @@ def execute_task(task_id: str, request: TaskExecuteRequest = TaskExecuteRequest(
             detail="Task not found",
         )
 
+    req = request or TaskExecuteRequest()
     try:
         updated_task = orchestrator.execute_task(
             task_id=task_id,
-            timeout_seconds=request.timeout_seconds,
+            timeout_seconds=req.timeout_seconds,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -220,7 +229,7 @@ def execute_task(task_id: str, request: TaskExecuteRequest = TaskExecuteRequest(
 
 
 @app.post("/tasks/{task_id}/approve", response_model=TaskResultResponse)
-def approve_task(task_id: str, request: TaskApproveRequest = TaskApproveRequest()):
+def approve_task(task_id: str, request: Optional[TaskApproveRequest] = None):
     """
     Approve a task paused in 'requires_approval' status and resume execution.
     """
@@ -231,11 +240,12 @@ def approve_task(task_id: str, request: TaskApproveRequest = TaskApproveRequest(
             detail="Task not found",
         )
 
+    req = request or TaskApproveRequest()
     try:
         updated_task = orchestrator.approve_task(
             task_id=task_id,
-            approval_reference=request.approval_reference,
-            timeout_seconds=request.timeout_seconds,
+            approval_reference=req.approval_reference,
+            timeout_seconds=req.timeout_seconds,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -305,3 +315,9 @@ def run_command(request: CommandRunRequest):
         "audit": task.get("audit"),
         "duration_ms": task.get("duration_ms"),
     }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=True)
+
