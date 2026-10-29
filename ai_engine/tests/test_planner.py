@@ -120,6 +120,45 @@ class TestTaskPlanner(unittest.TestCase):
             CommandRequest(text="Open Visual Studio")
         )
         self.assertEqual(result.status, "clarification_required")
+    
+   
+    def test_mixed_case_command(self):
+        response = self.planner.process_command(
+            CommandRequest(text="OpEn NoTePaD")
+        )
+        self.assertEqual(response.status, "plan_ready")
+
+    def test_launch_calculator(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Please launch Calculator")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "Calculator")
+
+    def test_could_you_start_chrome(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Could you start Chrome")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "Google Chrome")
+
+    def test_misspelled_notepad_variant(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Open Notepadd")
+        )
+        self.assertEqual(response.status, "plan_ready")
+
+    def test_unknown_application_name(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Open Blender")
+        )
+        self.assertEqual(response.status, "unsupported")
+
+    def test_whitespace_only_input(self):
+        response = self.planner.process_command(
+            CommandRequest(text="       ")
+        )
+        self.assertEqual(response.status, "clarification_required")
 
 
 
