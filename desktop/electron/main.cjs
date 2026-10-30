@@ -2,6 +2,10 @@ const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } = require
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const { launchApp } = require('./appLauncher.cjs');
+const { resolveAppTarget } = require('./shortcutDiscovery.cjs');
+const { moveAvatarTo, returnHome, cancelActiveMovement } = require('./desktopMovement.cjs');
+
 
 let dashboardWindow = null;
 let avatarWindow = null;
@@ -142,7 +146,8 @@ function createAvatarWindow() {
     hasShadow: false,
     resizable: false,
     alwaysOnTop: true,
-    skipTaskbar: false,
+    skipTaskbar: true,
+    focusable: false,
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -160,9 +165,18 @@ function createAvatarWindow() {
 
   loadWindow(avatarWindow, 'avatar');
 
-  avatarWindow.once('ready-to-show', () => {
+    avatarWindow.once('ready-to-show', () => {
     console.log('[Electron] Floating companion avatar window ready and shown at', { x, y, width, height });
     avatarWindow.show();
+    try {
+      avatarWindow.setAlwaysOnTop(true, 'screen-saver');
+    } catch {
+      avatarWindow.setAlwaysOnTop(true);
+    }
+  });
+
+  avatarWindow.webContents.on('console-message', (_e, level, message) => {
+    console.log('[AvatarWindow:Console]', message);
   });
 
   avatarWindow.on('closed', () => {
@@ -255,6 +269,157 @@ function createTray() {
 }
 
 // IPC Handlers
+// -- App Launcher IPC Handler --------------------------------------------------
+// Accepts only an app identifier string against an explicit allowlist.
+// Never executes arbitrary shell commands from the renderer.
+ipcMain.handle('companion:launch-app', async (_event, appId) => {
+  console.log('[Electron] companion:launch-app requested for:', appId);
+  try {
+    const result = await launchApp(appId);
+    console.log('[Electron] companion:launch-app result:', result);
+    return result;
+  } catch (err) {
+    console.error('[Electron] companion:launch-app unexpected error:', err);
+    return {
+      success: false,
+      verified: false,
+      displayName: appId,
+      mode: 'real',
+      error: 'Unexpected launcher error: ' + err.message,
+    };
+  }
+});
+let executionMode = 'real'; // 'real' | 'mock'
+
+ipcMain.handle('companion:set-execution-mode', (_event, mode) => {
+  executionMode = mode === 'mock' ? 'mock' : 'real';
+  console.log('[Electron] Execution mode set to:', executionMode);
+  return executionMode;
+});
+
+ipcMain.handle('companion:get-execution-mode', () => {
+  return executionMode;
+});
+
+ipcMain.handle('companion:cancel-movement', () => {
+  console.log('[Electron] Movement cancelled by user request');
+  cancelActiveMovement();
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.webContents.send('companion:sync-state', {
+      avatarState: 'Error',
+      taskState: 'cancelled',
+      isMoving: false,
+    });
+  }
+  return true;
+});
+
+ipcMain.handle('companion:return-home', async () => {
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    return await returnHome(avatarWindow);
+  }
+  return false;
+});
+
+// -- Physical Desktop Movement & Launch Pipeline ---------------------------------
+ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayName }) => {
+  console.log(`[Electron] Starting desktop task for "${appId}" (${displayName}) in ${executionMode} mode`);
+
+  // Step 1: Discovered Desktop Shortcut or Calculated Destination
+  const targetInfo = resolveAppTarget(appId);
+  console.log('[Electron] Discovered target info:', targetInfo);
+
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('companion:task-progress', {
+      phase: 'planning',
+      appId,
+      displayName,
+      targetInfo,
+      executionMode,
+    });
+  }
+
+  // Step 2: Physical Movement across Windows Desktop
+  let moveResult = { completed: true, cancelled: false };
+
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.show();
+    avatarWindow.webContents.send('companion:sync-state', {
+      avatarState: 'Working',
+      taskState: 'launching',
+      isMoving: true,
+    });
+
+    moveResult = await moveAvatarTo(
+      avatarWindow,
+      targetInfo.destination.x,
+      targetInfo.destination.y,
+      {
+        onStep: (stepData) => {
+          if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+            dashboardWindow.webContents.send('companion:movement-progress', stepData);
+          }
+        },
+      }
+    );
+  }
+
+  if (moveResult.cancelled) {
+    return {
+      success: false,
+      cancelled: true,
+      taskState: 'cancelled',
+      displayName: displayName || appId,
+      executionMode,
+      error: 'Movement cancelled by user',
+    };
+  }
+
+  // Step 3: Launch Application
+  let launchResult;
+  if (executionMode === 'mock') {
+    await new Promise((r) => setTimeout(r, 800));
+    launchResult = {
+      success: true,
+      verified: false,
+      displayName: displayName || appId,
+      mode: 'mock',
+      mockSimulated: true,
+      message: `[MOCK MODE] Simulated launch of ${displayName || appId}. No real Windows process was started.`,
+    };
+  } else {
+    launchResult = await launchApp(appId);
+  }
+
+  // Step 4: Verification and Celebration
+  const finalState = launchResult.success ? 'success' : 'failed';
+
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.webContents.send('companion:sync-state', {
+      avatarState: launchResult.success ? 'Success' : 'Error',
+      taskState: finalState,
+      isMoving: false,
+    });
+  }
+
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('companion:task-progress', {
+      phase: finalState,
+      appId,
+      displayName,
+      launchResult,
+      executionMode,
+    });
+  }
+
+  return {
+    ...launchResult,
+    taskState: finalState,
+    targetInfo,
+    executionMode,
+  };
+});
+
 ipcMain.handle('companion:open-dashboard', () => {
   if (!dashboardWindow || dashboardWindow.isDestroyed()) {
     createDashboardWindow();
