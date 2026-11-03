@@ -2,11 +2,52 @@
 Pydantic schemas and models for the Backend API.
 
 Defines schemas for tasks, planning, permissions, execution results,
-and application catalogue endpoints in alignment with TEAM_CONTRACTS.md.
+voice input, voice transcript, shared task submission, and progress tracking
+in alignment with TEAM_CONTRACTS.md.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Structured Task States
+# ---------------------------------------------------------------------------
+
+TaskState = Literal[
+    "listening",
+    "processing",
+    "matching",
+    "launching",
+    "launched",
+    "failed",
+    "requires_approval",
+    "cancelled",
+    "pending",
+    "running",
+    "completed",
+]
+
+
+# ---------------------------------------------------------------------------
+# Timeline & Progress Schemas
+# ---------------------------------------------------------------------------
+
+class TimelineEntry(BaseModel):
+    """Single chronological progress entry in task lifecycle."""
+    timestamp: str
+    state: str
+    message: str
+
+
+class TaskProgressResponse(BaseModel):
+    """Granular task execution progress response."""
+    task_id: str
+    status: str
+    progress_percent: int
+    current_stage: str
+    timeline: List[TimelineEntry] = Field(default_factory=list)
+    message: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +138,66 @@ class CommandRunRequest(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
     auto_approve: bool = False
     timeout_seconds: float = 10.0
+
+
+# ---------------------------------------------------------------------------
+# Voice & Unified Submission Schemas
+# ---------------------------------------------------------------------------
+
+class VoiceInputRequest(BaseModel):
+    """Payload for voice input API."""
+    audio_data: Optional[str] = None  # Base64 or audio identifier
+    format: str = "wav"
+    sample_rate: int = 16000
+    simulate_service_down: bool = False
+    idempotency_key: Optional[str] = None
+    auto_execute: bool = True
+    timeout_seconds: float = 10.0
+
+
+class VoiceInputResponse(BaseModel):
+    """Response returned upon accepting voice input."""
+    task_id: str
+    status: str
+    message: str
+    input_type: str = "voice"
+
+
+class VoiceTranscriptRequest(BaseModel):
+    """Payload for voice transcript API."""
+    transcript: str = Field(min_length=1, max_length=1000)
+    confidence: float = 1.0
+    language: str = "en"
+    auto_execute: bool = True
+    idempotency_key: Optional[str] = None
+    timeout_seconds: float = 10.0
+
+
+class VoiceTranscriptResponse(BaseModel):
+    """Response returned upon submitting voice transcript."""
+    task_id: str
+    status: str
+    transcript: str
+    message: str
+    input_type: str = "voice"
+
+
+class TaskSubmitRequest(BaseModel):
+    """Unified task submission payload for text or voice commands."""
+    command: str = Field(min_length=1, max_length=1000)
+    input_type: Literal["text", "voice"] = "text"
+    auto_execute: bool = True
+    idempotency_key: Optional[str] = None
+    timeout_seconds: float = 10.0
+
+
+class TaskSubmitResponse(BaseModel):
+    """Response returned from unified task submission."""
+    task_id: str
+    input_type: str
+    command: str
+    status: str
+    message: str
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,9 @@ Exposes endpoints for:
 2. Command planning via AI Engine (/plan)
 3. Application catalogue inspection (/catalogue)
 4. Task lifecycle management, orchestration, execution, approval, and cancellation (/tasks)
+5. Voice input & voice transcript processing (/voice/input, /voice/transcript)
+6. Unified task submission (/tasks/submit)
+7. Granular task progress updates (/tasks/{task_id}/progress)
 """
 
 import sys
@@ -22,7 +25,11 @@ from fastapi import FastAPI, HTTPException, Query, status
 
 from ai_engine.planner.task_planner import TaskPlanner
 from ai_engine.schemas.command_schema import CommandRequest
-from api.orchestrator import TaskOrchestrator
+from api.orchestrator import (
+    DuplicateRequestError,
+    TaskOrchestrator,
+    VoiceServiceUnavailableError,
+)
 from api.schemas import (
     AppCatalogueItem,
     CommandRunRequest,
@@ -31,15 +38,22 @@ from api.schemas import (
     TaskApproveRequest,
     TaskCreate,
     TaskExecuteRequest,
+    TaskProgressResponse,
     TaskResponse,
     TaskResultResponse,
     TaskStatusResponse,
+    TaskSubmitRequest,
+    TaskSubmitResponse,
+    VoiceInputRequest,
+    VoiceInputResponse,
+    VoiceTranscriptRequest,
+    VoiceTranscriptResponse,
 )
 
 app = FastAPI(
     title="AI Desktop Companion API",
     description="Backend orchestration service for AI Desktop Companion",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 # Global in-memory storage for active tasks
@@ -116,7 +130,128 @@ def get_catalogue_app(app_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Task Lifecycle Management Endpoints
+# Voice Input & Voice Transcript Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/voice/input", status_code=status.HTTP_202_ACCEPTED, response_model=VoiceInputResponse)
+def submit_voice_input(request: VoiceInputRequest):
+    """
+    Voice Input API: Accepts raw or simulated voice audio data, checks service
+    availability, and initializes listening/processing in the shared pipeline.
+    """
+    if request.simulate_service_down:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Voice service is currently unavailable.",
+        )
+
+    try:
+        task = orchestrator.run_pipeline(
+            command=None,
+            input_type="voice",
+            auto_execute=request.auto_execute,
+            idempotency_key=request.idempotency_key,
+            timeout_seconds=request.timeout_seconds,
+            simulate_service_down=request.simulate_service_down,
+        )
+    except DuplicateRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "message": task["message"],
+        "input_type": "voice",
+    }
+
+
+@app.post("/voice/transcript", status_code=status.HTTP_201_CREATED, response_model=VoiceTranscriptResponse)
+def submit_voice_transcript(request: VoiceTranscriptRequest):
+    """
+    Voice Transcript API: Accepts transcribed voice commands and executes them
+    through the shared task execution pipeline.
+    """
+    try:
+        task = orchestrator.run_pipeline(
+            command=request.transcript,
+            input_type="voice",
+            auto_execute=request.auto_execute,
+            idempotency_key=request.idempotency_key,
+            timeout_seconds=request.timeout_seconds,
+        )
+    except DuplicateRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "transcript": request.transcript,
+        "message": task["message"],
+        "input_type": "voice",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Unified Task Submission Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/tasks/submit", status_code=status.HTTP_201_CREATED, response_model=TaskSubmitResponse)
+def submit_task(request: TaskSubmitRequest):
+    """
+    Unified Task Submission API: Single entrypoint for both text and voice requests.
+    Both input types travel through the identical shared pipeline.
+    """
+    try:
+        task = orchestrator.run_pipeline(
+            command=request.command,
+            input_type=request.input_type,
+            auto_execute=request.auto_execute,
+            idempotency_key=request.idempotency_key,
+            timeout_seconds=request.timeout_seconds,
+        )
+    except DuplicateRequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+
+    return {
+        "task_id": task["task_id"],
+        "input_type": request.input_type,
+        "command": request.command,
+        "status": task["status"],
+        "message": task["message"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Task Progress Update API
+# ---------------------------------------------------------------------------
+
+@app.get("/tasks/{task_id}/progress", response_model=TaskProgressResponse)
+def get_task_progress(task_id: str):
+    """
+    Task Progress Update API: Returns real-time execution progress percentage,
+    current stage, and chronological progress timeline.
+    """
+    try:
+        progress_data = orchestrator.get_progress(task_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task '{task_id}' not found",
+        )
+    return progress_data
+
+
+# ---------------------------------------------------------------------------
+# Task Lifecycle Management Endpoints (Preserved & Enhanced)
 # ---------------------------------------------------------------------------
 
 @app.post("/tasks", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
@@ -136,7 +271,7 @@ def create_task(task: TaskCreate):
 @app.get("/tasks", response_model=List[TaskResponse])
 def list_tasks(task_status: Optional[str] = Query(None, alias="status")):
     """
-    List all tasks, optionally filtered by status (pending, running, completed, failed, cancelled).
+    List all tasks, optionally filtered by status.
     """
     return orchestrator.list_tasks(status=task_status)
 
@@ -166,7 +301,8 @@ def get_task_status(task_id: str):
 @app.get("/tasks/{task_id}/result", response_model=TaskResultResponse)
 def get_task_result(task_id: str):
     """
-    Get detailed execution result, verification evidence, and audit details for a task.
+    Final Task Result API: Get detailed execution result, verification evidence,
+    and audit details for a task.
     """
     task = tasks.get(task_id)
     if task is None:
@@ -319,4 +455,3 @@ def run_command(request: CommandRunRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
-
