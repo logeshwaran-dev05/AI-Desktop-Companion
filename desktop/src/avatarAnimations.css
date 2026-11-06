@@ -4,6 +4,7 @@
  * All animation states are driven by CSS classes set from React state.
  * State → class mapping:
  *   idle        → .avatar-state-idle
+ *   listening   → .avatar-state-listening
  *   thinking    → .avatar-state-thinking
  *   waiting     → .avatar-state-waiting
  *   running     → .avatar-state-running
@@ -21,6 +22,16 @@
 @keyframes avatar-float {
   0%, 100% { transform: translateY(0); }
   50%       { transform: translateY(-8px); }
+}
+
+@keyframes avatar-attentive-pulse {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%       { transform: translateY(-4px) scale(1.02); }
+}
+
+@keyframes listening-wave {
+  0%, 100% { height: 4px; }
+  50%       { height: 14px; }
 }
 
 @keyframes avatar-blink {
@@ -77,6 +88,25 @@
   animation: avatar-float 3.2s ease-in-out infinite;
 }
 
+/* Listening — attentive slight pulse */
+.avatar-state-listening .avatar-char-wrap,
+.avatar-state-listening .avatar-sprite-wrapper,
+.avatar-char-wrap.avatar-state-listening,
+.avatar-sprite-wrapper.avatar-state-listening {
+  animation: avatar-attentive-pulse 1.8s ease-in-out infinite;
+}
+
+.listening-bar {
+  display: inline-block;
+  width: 2.5px;
+  height: 8px;
+  background: #38bdf8;
+  border-radius: 2px;
+}
+.listening-bar.bar-1 { animation: listening-wave 0.6s ease-in-out infinite; }
+.listening-bar.bar-2 { animation: listening-wave 0.8s ease-in-out infinite 0.15s; }
+.listening-bar.bar-3 { animation: listening-wave 0.7s ease-in-out infinite 0.3s; }
+
 /* Thinking — head tilt loop */
 .avatar-state-thinking .avatar-char-wrap,
 .avatar-state-thinking .avatar-sprite-wrapper,
@@ -131,6 +161,10 @@
   .avatar-state-idle .avatar-sprite-wrapper,
   .avatar-char-wrap.avatar-state-idle,
   .avatar-sprite-wrapper.avatar-state-idle,
+  .avatar-state-listening .avatar-char-wrap,
+  .avatar-state-listening .avatar-sprite-wrapper,
+  .avatar-char-wrap.avatar-state-listening,
+  .avatar-sprite-wrapper.avatar-state-listening,
   .avatar-state-thinking .avatar-char-wrap,
   .avatar-state-thinking .avatar-sprite-wrapper,
   .avatar-char-wrap.avatar-state-thinking,
@@ -296,4 +330,3 @@
 .cancel-move-btn:hover {
   background: rgba(239, 68, 68, 0.35);
 }
-

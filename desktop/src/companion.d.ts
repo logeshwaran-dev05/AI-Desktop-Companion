@@ -56,6 +56,7 @@ export interface CompanionAPI {
   returnHome: () => Promise<boolean>;
   setExecutionMode: (mode: 'real' | 'mock') => Promise<'real' | 'mock'>;
   getExecutionMode: () => Promise<'real' | 'mock'>;
+  triggerVoiceTyping?: () => Promise<boolean>;
 
   onTaskProgress: (callback: (data: any) => void) => () => void;
   onMovementProgress: (callback: (data: MovementStep) => void) => () => void;

@@ -129,8 +129,8 @@ function createAvatarWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
 
-  const width = 230;
-  const height = 280;
+  const width = 240;
+  const height = 300;
   // Position in bottom-right corner of work area with safe padding
   const x = Math.max(0, Math.round(workArea.x + workArea.width - width - 24));
   const y = Math.max(0, Math.round(workArea.y + workArea.height - height - 24));
@@ -470,6 +470,22 @@ ipcMain.handle('companion:move-avatar', (_event, { deltaX, deltaY }) => {
 ipcMain.handle('companion:quit-app', () => {
   app.isQuitting = true;
   app.quit();
+});
+
+ipcMain.handle('companion:trigger-voice-typing', async () => {
+  const { exec } = require('child_process');
+  const psFile = path.join(__dirname, 'triggerVoiceTyping.ps1');
+  return new Promise((resolve) => {
+    exec(`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${psFile}"`, (err, stdout) => {
+      if (err) {
+        console.warn('[Electron] Trigger voice typing error:', err);
+        resolve(false);
+      } else {
+        console.log('[Electron] Triggered Windows Voice Typing (Win+H):', (stdout || '').trim());
+        resolve(true);
+      }
+    });
+  });
 });
 
 ipcMain.handle('companion:sync-state', (_event, data) => {

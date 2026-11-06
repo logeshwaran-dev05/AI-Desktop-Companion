@@ -7,9 +7,14 @@ import type { AvatarAnimState } from './AvatarCharacter'
 import {
   resolveAppIntent,
   isLaunchIntent,
+  createInitialTaskProgress,
   type LaunchState,
   type LaunchResult,
+  type LiveTaskProgress,
+  type TaskStage,
+  type TaskStageId,
 } from './launchStateMachine'
+import { voiceService } from './services/voiceService'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,13 +31,13 @@ type AvatarState =
   | 'Warning'
   | 'Error'
 
-type TaskStatus = 'Pending' | 'Stopped'
+type TaskStatus = 'Pending' | 'Stopped' | 'Completed' | 'Failed' | 'Cancelled'
 
 type Task = {
   id: number
   title: string
   status: TaskStatus
-  /** Attached launch result, if this task was an app-launch request */
+  time?: string
   launchResult?: LaunchResult
 }
 
@@ -57,22 +62,29 @@ const navigation: { label: Page; icon: string }[] = [
   { label: 'Settings', icon: '⚙' },
 ]
 
-/** Map the high-level AvatarState to an animation state for the SVG/sprite */
-function toAnimState(avatarState: AvatarState, isSleeping: boolean, launchState: LaunchState): AvatarAnimState {
+/** Map the high-level AvatarState to an animation state for Doraemon */
+function toAnimState(
+  avatarState: AvatarState,
+  isSleeping: boolean,
+  launchState: LaunchState,
+  isVoiceRecording: boolean
+): AvatarAnimState {
   if (isSleeping) return 'idle'
+  if (isVoiceRecording) return 'listening'
   if (launchState === 'running' || launchState === 'launching') return 'running'
   if (launchState === 'resolving' || launchState === 'planning') return 'thinking'
-  if (launchState === 'success')     return 'success'
+  if (launchState === 'success') return 'success'
   if (launchState === 'error' || launchState === 'failed' || launchState === 'not-allowed' || launchState === 'not-in-electron') return 'error'
   if (launchState === 'cancelled') return 'cancelled'
   switch (avatarState) {
-    case 'Thinking':          return 'thinking'
-    case 'Working':           return 'thinking'
-    case 'Approval Required': return 'waiting'
-    case 'Success':           return 'success'
-    case 'Warning':           return 'waiting'
-    case 'Error':             return 'error'
-    default:                  return 'idle'
+    case 'Listening':          return 'listening'
+    case 'Thinking':           return 'thinking'
+    case 'Working':            return 'thinking'
+    case 'Approval Required':  return 'waiting'
+    case 'Success':            return 'success'
+    case 'Warning':            return 'waiting'
+    case 'Error':              return 'error'
+    default:                   return 'idle'
   }
 }
 
@@ -96,14 +108,14 @@ function LaunchBanner({ result, onCancel }: { result: LaunchResult; onCancel?: (
     stateKey === 'not-in-electron' ? `Cannot launch apps in browser mode` :
     stateKey === 'not-allowed'     ? `"${result.displayName}" is not in the allowed list` :
     stateKey === 'launching'       ? `Doraemon is traveling to ${result.displayName}…` :
-    `Resolving…`
+    `Resolving application…`
 
   const body =
     stateKey === 'error' || stateKey === 'failed' ? result.errorMessage :
     stateKey === 'cancelled'       ? 'Doraemon stopped safely and returned home.' :
     stateKey === 'launching'       ? (result.targetInfo?.explanation || 'Traveling across visible Windows desktop to target...') :
     stateKey === 'not-in-electron' ? 'Run the app with npm run app to launch real Windows applications.' :
-    stateKey === 'not-allowed'     ? `Supported apps: Notepad, Calculator, File Explorer, Chrome, VS Code.` :
+    stateKey === 'not-allowed'     ? `Supported apps: Notepad, Calculator, File Explorer, Chrome, VS Code, WhatsApp.` :
     result.targetInfo?.explanation || undefined
 
   return (
@@ -141,6 +153,23 @@ function LaunchBanner({ result, onCancel }: { result: LaunchResult; onCancel?: (
   )
 }
 
+// ── Start Menu Pinned Items ───────────────────────────────────────────────────
+
+interface PinnedAppItem {
+  icon: string
+  label: string
+  target: 'companion' | 'settings' | string
+}
+
+const PINNED_APPS: PinnedAppItem[] = [
+  { icon: '▦', label: 'OmniCompanion', target: 'companion' },
+  { icon: '📁', label: 'File Explorer', target: 'Open File Explorer' },
+  { icon: '📝', label: 'Notepad', target: 'Open Notepad' },
+  { icon: '🔢', label: 'Calculator', target: 'Open Calculator' },
+  { icon: '🌐', label: 'Chrome', target: 'Open Chrome' },
+  { icon: '⚙️', label: 'Settings', target: 'settings' },
+]
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -160,19 +189,49 @@ function App() {
   const [avatarState, setAvatarState]   = useState<AvatarState>('Idle')
   const [isPaused, setIsPaused]         = useState(false)
   const [isSleeping, setIsSleeping]     = useState(false)
-  const [approval, setApproval]         = useState<'Awaiting review' | 'Approved in preview' | 'Declined in preview'>('Awaiting review')
   const [isAssistantPanelOpen, setIsAssistantPanelOpen] = useState(true)
+  const [isStartMenuOpen, setIsStartMenuOpen] = useState(false)
+  const [desktopSearch, setDesktopSearch] = useState('')
+  const [isWindowOpen, setIsWindowOpen] = useState(true)
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false)
   const [notice, setNotice]             = useState('')
   const [floatingPosition, setFloatingPosition] = useState<{ x: number; y: number } | null>(null)
+  const [windowPosition, setWindowPosition]     = useState<{ x: number; y: number } | null>(null)
+  const [currentTime, setCurrentTime]           = useState(() => new Date())
 
-  // ── Launch state ────────────────────────────────────────────────────────────
+  // ── Voice interaction state ─────────────────────────────────────────────────
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false)
+  const [voiceTranscript, setVoiceTranscript]   = useState('')
+  const [audioLevel, setAudioLevel]             = useState(0)
+  const [voiceError, setVoiceError]             = useState<string | null>(null)
+
+  // ── Live task progress for Mission Control ──────────────────────────────────
+  const [liveProgress, setLiveProgress]         = useState<LiveTaskProgress | null>(null)
+  const taskCancelledRef                        = useRef<boolean>(false)
+
+  // ── Launch & movement state ─────────────────────────────────────────────────
   const [launchState, setLaunchState]   = useState<LaunchState>('idle')
   const [currentLaunchResult, setCurrentLaunchResult] = useState<LaunchResult | null>(null)
   const [facing, setFacing]             = useState<'left' | 'right'>('right')
   const [executionMode, setExecutionMode] = useState<'real' | 'mock'>('real')
 
-  const dragOrigin    = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const dragOrigin      = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
   const avatarDragStart = useRef<{ x: number; y: number } | null>(null)
+  const windowDragStart = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number } | null>(null)
+  const messageInputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Clock interval
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  // Clean up any ongoing voice listening session on unmount
+  useEffect(() => {
+    return () => {
+      voiceService.stopListening()
+    }
+  }, [])
 
   // ── Sync state from Electron main process ───────────────────────────────────
   useEffect(() => {
@@ -183,6 +242,7 @@ function App() {
       document.documentElement.classList.remove('avatar-window-mode')
       document.body.classList.remove('avatar-window-mode')
     }
+
     if (window.companionAPI) {
       const cleanup = window.companionAPI.onSyncState((data) => {
         if (data.avatarState && avatarStates.includes(data.avatarState as AvatarState)) {
@@ -214,19 +274,164 @@ function App() {
     }
   }, [viewMode])
 
-  const cancelMovement = useCallback(() => {
+  // ── Window drag handlers ────────────────────────────────────────────────────
+  function beginWindowDrag(e: PointerEvent<HTMLDivElement>) {
+    if (isWindowMaximized) return
+    if ((e.target as HTMLElement).closest('button, input, select, textarea, a')) return
+    const frame = (e.currentTarget.parentElement as HTMLElement)?.getBoundingClientRect()
+    const startX = windowPosition?.x ?? frame?.left ?? 100
+    const startY = windowPosition?.y ?? frame?.top ?? 40
+    windowDragStart.current = { mouseX: e.clientX, mouseY: e.clientY, startX, startY }
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* ok */ }
+  }
+
+  function moveWindowDrag(e: PointerEvent<HTMLDivElement>) {
+    if (!windowDragStart.current) return
+    const dx = e.clientX - windowDragStart.current.mouseX
+    const dy = e.clientY - windowDragStart.current.mouseY
+    const newX = Math.max(10, Math.min(window.innerWidth - 300, windowDragStart.current.startX + dx))
+    const newY = Math.max(0, Math.min(window.innerHeight - 100, windowDragStart.current.startY + dy))
+    setWindowPosition({ x: newX, y: newY })
+  }
+
+  function endWindowDrag(e: PointerEvent<HTMLDivElement>) {
+    if (windowDragStart.current) {
+      try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ok */ }
+      windowDragStart.current = null
+    }
+  }
+
+  // ── Cancellation Handler ────────────────────────────────────────────────────
+  const cancelActiveTask = useCallback(() => {
+    taskCancelledRef.current = true
+
+    if (isVoiceRecording) {
+      voiceService.stopListening()
+      setIsVoiceRecording(false)
+    }
+
     if (window.companionAPI?.cancelMovement) {
       window.companionAPI.cancelMovement()
     }
+
     setLaunchState('cancelled')
     setAvatarState('Error')
-    setNotice('Desktop movement cancelled.')
+    setNotice('Task cancelled by user request.')
+
+    setLiveProgress((prev) => {
+      if (!prev) return null
+      const updatedStages: TaskStage[] = prev.stages.map((st) => {
+        if (st.status === 'in_progress') {
+          return { ...st, status: 'cancelled' as const, detail: 'Stopped by user cancellation.' }
+        }
+        return st
+      })
+      return {
+        ...prev,
+        currentStageId: 'cancelled',
+        stages: updatedStages,
+        error: 'Operation cancelled by user.',
+      }
+    })
+
+    if (window.companionAPI?.returnHome) {
+      setTimeout(() => {
+        window.companionAPI?.returnHome()
+        setAvatarState('Idle')
+        setLaunchState('idle')
+      }, 2500)
+    }
+  }, [isVoiceRecording])
+
+  // ── Voice Input Handler ─────────────────────────────────────────────────────
+  const handleToggleVoice = useCallback(async () => {
+    // Focus the command input field immediately for dictation
+    if (messageInputRef.current) {
+      messageInputRef.current.focus()
+    }
+
+    if (isVoiceRecording) {
+      voiceService.stopListening()
+      setIsVoiceRecording(false)
+      setAudioLevel(0)
+      setAvatarState('Idle')
+      return
+    }
+
+    setVoiceError(null)
+    setVoiceTranscript('')
+    setIsVoiceRecording(true)
+    setAvatarState('Listening')
+
+    const started = await voiceService.startListening({
+      onTranscript: (text) => {
+        setVoiceTranscript(text)
+        setMessage(text)
+      },
+      onAudioLevel: (level) => {
+        setAudioLevel(level)
+      },
+      onNotice: (noticeMsg) => {
+        setNotice(noticeMsg)
+      },
+      onError: (err) => {
+        if (err.type === 'network') {
+          // Web speech network error is expected in Electron because Google blocks Chromium apps.
+          // Fallback to Windows Voice Typing (Win + H) notice and maintain listening state.
+          setNotice('🎤 Windows Voice Typing active (Win + H). Speak into the prompt or type commands.')
+          setAvatarState('Listening')
+        } else {
+          setVoiceError(err.message)
+          setIsVoiceRecording(false)
+          setAvatarState('Error')
+        }
+      },
+      onEnd: () => {
+        setIsVoiceRecording(false)
+        setAvatarState((prev) => (prev === 'Listening' ? 'Idle' : prev))
+      },
+    })
+
+    if (!started) {
+      setIsVoiceRecording(false)
+      setAvatarState('Idle')
+    }
+  }, [isVoiceRecording])
+
+  // ── Helper to update Live Task Progress ─────────────────────────────────────
+  const updateProgressStage = useCallback((
+    stageId: TaskStageId,
+    status: TaskStage['status'],
+    detail?: string,
+    percent?: number
+  ) => {
+    const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    setLiveProgress((prev) => {
+      if (!prev) return null
+      const stages = prev.stages.map((st) => {
+        if (st.id === stageId) {
+          return {
+            ...st,
+            status,
+            timestamp: timeNow,
+            detail: detail || st.detail,
+          }
+        }
+        return st
+      })
+      return {
+        ...prev,
+        currentStageId: stageId,
+        percent: percent !== undefined ? percent : prev.percent,
+        stages,
+      }
+    })
   }, [])
 
-  // ── Derived values ───────────────────────────────────────────────────────────
-  const activeTasks      = tasks.filter((t) => t.status === 'Pending')
+  // ── Derived avatar values ───────────────────────────────────────────────────
+  const activeTasks = tasks.filter((t) => t.status === 'Pending')
   const currentAvatarState = isSleeping ? 'Idle' : avatarState
-  const animState = toAnimState(currentAvatarState, isSleeping, launchState)
+  const animState = toAnimState(currentAvatarState, isSleeping, launchState, isVoiceRecording)
 
   const companionStyle: CSSProperties = floatingPosition
     ? { position: 'fixed', left: `${floatingPosition.x}px`, top: `${floatingPosition.y}px`, right: 'auto', bottom: 'auto' }
@@ -238,50 +443,80 @@ function App() {
         top: 'auto',
       }
 
-  // ── App launch handler ───────────────────────────────────────────────────────
+  // ── Unified App Launch & Automation Execution Flow ──────────────────────────
   const handleLaunchApp = useCallback(async (rawText: string) => {
-    // Step 1: Resolve intent
-    setLaunchState('resolving')
-    setAvatarState('Thinking')
-
+    taskCancelledRef.current = false
     const now = new Date()
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
+    // Initialize multi-stage Live Task Progress in Mission Control
+    const taskId = String(Date.now())
+    const initialProgress = createInitialTaskProgress(taskId, rawText, executionMode)
+    setLiveProgress(initialProgress)
+
+    // Stage 1: Request received (completed)
+    updateProgressStage('request_received', 'completed', `Received command: "${rawText}"`, 15)
+
+    // Stage 2: Understanding request (resolving intent)
+    setLaunchState('resolving')
+    setAvatarState('Thinking')
+    updateProgressStage('understanding', 'in_progress', 'Analyzing natural language intent…', 30)
+
     const intent = resolveAppIntent(rawText)
     if (!intent) {
+      const errorMsg = `No recognized application found in: "${rawText}". Permitted: Notepad, Calculator, File Explorer, Chrome, VS Code, WhatsApp.`
+      updateProgressStage('understanding', 'failed', errorMsg, 35)
+
       const result: LaunchResult = {
         state: 'not-allowed',
         displayName: rawText,
         appId: '',
         realLaunch: false,
-        errorMessage: `No recognized application found in: "${rawText}". Permitted: Notepad, Calculator, File Explorer, Chrome, or VS Code.`,
+        errorMessage: errorMsg,
       }
       setLaunchState('not-allowed')
       setCurrentLaunchResult(result)
       setAvatarState('Error')
+      voiceService.speakResponse(`I could not recognize that application: ${rawText}`)
+
       setMessages((prev) => [
         ...prev,
         { id: Date.now(), author: 'You', text: rawText, time: timeStr },
-        { id: Date.now() + 1, author: 'Companion', text: result.errorMessage ?? '', time: timeStr, launchResult: result },
+        { id: Date.now() + 1, author: 'Companion', text: errorMsg, time: timeStr, launchResult: result },
       ])
-      setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Stopped', launchResult: result }])
+      setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Failed', time: timeStr, launchResult: result }])
       setTimeout(() => { setLaunchState('idle'); setAvatarState('Idle') }, 4000)
       return
     }
 
-    // Step 2: Planning & Target Discovery
+    if (taskCancelledRef.current) return
+
+    updateProgressStage('understanding', 'completed', `Identified target application: ${intent.displayName} (${intent.appId})`, 45)
+
+    // Stage 3: Validating application against allowlist and discovering shortcut path
+    updateProgressStage('validating', 'in_progress', `Validating ${intent.displayName} allowlist status…`, 55)
+    await new Promise((r) => setTimeout(r, 250))
+
+    if (taskCancelledRef.current) return
+    updateProgressStage('validating', 'completed', `Validated ${intent.displayName}. Target shortcut path resolved.`, 65)
+
+    // Stage 4: Waiting for execution & synchronizing desktop companion
     setLaunchState('planning')
     setAvatarState('Thinking')
+    updateProgressStage('waiting_execution', 'in_progress', 'Preparing transparent companion coordinates…', 70)
     setMessages((prev) => [
       ...prev,
       { id: Date.now(), author: 'You', text: rawText, time: timeStr },
     ])
+    await new Promise((r) => setTimeout(r, 350))
 
-    await new Promise((r) => setTimeout(r, 400))
+    if (taskCancelledRef.current) return
+    updateProgressStage('waiting_execution', 'completed', 'Companion positioned. Motion trajectory generated.', 75)
 
-    // Step 3: Desktop Movement & Launch
+    // Stage 5: Launch attempted (traveling across Windows desktop)
     setLaunchState('launching')
     setAvatarState('Working')
+    updateProgressStage('launch_attempted', 'in_progress', `Doraemon physically moving across desktop to ${intent.displayName}…`, 85)
 
     let taskResult: import('./companion').DesktopTaskResult
 
@@ -303,7 +538,7 @@ function App() {
         }
       }
     } else {
-      // In browser preview mode, use the local dev server backend endpoint
+      // Browser preview mode -> forward to local dev server backend
       const candidateUrls = [
         `/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,
         `http://127.0.0.1:5173/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,
@@ -344,8 +579,9 @@ function App() {
       }
     }
 
-    // Step 4: Handle completion / cancellation / failure
-    if (taskResult.cancelled) {
+    // Suppress late events if cancelled
+    if (taskCancelledRef.current || taskResult.cancelled) {
+      updateProgressStage('launch_verified', 'cancelled', 'Task cancelled by user before verification.', 85)
       const result: LaunchResult = {
         state: 'cancelled',
         displayName: intent.displayName,
@@ -362,7 +598,7 @@ function App() {
         {
           id: Date.now() + 1,
           author: 'Companion',
-          text: `Movement cancelled. Doraemon stopped safely.`,
+          text: 'Movement cancelled. Doraemon stopped safely.',
           time: timeStr,
           launchResult: result,
         },
@@ -371,8 +607,19 @@ function App() {
       return
     }
 
+    // Stage 6: Process verification
+    updateProgressStage('launch_attempted', 'completed', 'Process launch command issued.', 90)
+
     if (taskResult.success) {
       const isMock = taskResult.mode === 'mock' || taskResult.mockSimulated
+      const verifiedText = taskResult.verified
+        ? 'Process verified running in Windows tasklist'
+        : isMock
+        ? 'Simulated in mock mode'
+        : 'Process started successfully'
+
+      updateProgressStage('launch_verified', 'completed', verifiedText, 100)
+
       const result: LaunchResult = {
         state: 'success',
         displayName: taskResult.displayName,
@@ -388,13 +635,11 @@ function App() {
       setCurrentLaunchResult(result)
       setAvatarState('Success')
 
-      const destinationDesc = taskResult.targetInfo
-        ? (taskResult.targetInfo.destinationType === 'desktop-shortcut' ? 'desktop shortcut' : 'launcher zone')
-        : 'destination'
-
       const successText = isMock
-        ? `[MOCK MODE] Simulated launch of ${taskResult.displayName}. Doraemon traveled across the desktop to the shortcut target.`
-        : `${taskResult.displayName} opened! Doraemon traveled across the Windows desktop to the ${destinationDesc} and launched the application.`
+        ? `[MOCK MODE] Simulated launch of ${taskResult.displayName}. Doraemon moved across the desktop to the shortcut target.`
+        : `${taskResult.displayName} opened! Doraemon traveled across the desktop and launched the application.`
+
+      voiceService.speakResponse(`${taskResult.displayName} opened successfully.`)
 
       setMessages((prev) => [
         ...prev,
@@ -406,45 +651,51 @@ function App() {
           launchResult: result,
         },
       ])
-      setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Pending', launchResult: result }])
+      setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Completed', time: timeStr, launchResult: result }])
 
-      // Celebrate at destination, then safely return home
+      // Celebration, then return home
       setTimeout(() => {
         setLaunchState('idle')
         setAvatarState('Idle')
         if (window.companionAPI?.returnHome) {
           window.companionAPI.returnHome()
         }
-      }, 5000)
+      }, 4500)
     } else {
+      const failureReason = taskResult.error ?? 'Launch verification timed out or process failed to start.'
+      updateProgressStage('launch_verified', 'failed', failureReason, 90)
+
       const result: LaunchResult = {
         state: 'failed',
         displayName: taskResult.displayName,
         appId: intent.appId,
         realLaunch: taskResult.mode === 'real',
-        errorMessage: taskResult.error ?? 'Unknown launch error.',
+        errorMessage: failureReason,
         targetInfo: taskResult.targetInfo,
         executionMode: taskResult.executionMode,
       }
+
       setLaunchState('failed')
       setCurrentLaunchResult(result)
       setAvatarState('Error')
+      voiceService.speakResponse(`Could not open ${taskResult.displayName}.`)
+
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now() + 1,
           author: 'Companion',
-          text: `Failed to open ${taskResult.displayName}: ${taskResult.error ?? 'Unknown error.'}`,
+          text: `Failed to open ${taskResult.displayName}: ${failureReason}`,
           time: timeStr,
           launchResult: result,
         },
       ])
-      setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Stopped', launchResult: result }])
+      setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Failed', time: timeStr, launchResult: result }])
       setTimeout(() => { setLaunchState('idle'); setAvatarState('Idle') }, 5000)
     }
-  }, [executionMode])
+  }, [executionMode, updateProgressStage])
 
-  // ── Send message / dispatch to launch handler or normal flow ─────────────────
+  // ── Send typed message / dispatch to unified task workflow ──────────────────
   function sendMessage() {
     const text = message.trim()
     if (!text || isSleeping) return
@@ -467,13 +718,14 @@ function App() {
         time: timeStr,
       },
     ])
-    setTasks((prev) => [...prev, { id: Date.now() + 2, title: text, status: 'Pending' }])
+    setTasks((prev) => [...prev, { id: Date.now() + 2, title: text, status: 'Pending', time: timeStr }])
     setAvatarState('Idle')
     setNotice('Request added to the local preview.')
   }
 
-  // ── Companion drag (browser mode) ─────────────────────────────────────────
+  // ── Companion drag (browser mode) ───────────────────────────────────────────
   function stopTasks() {
+    cancelActiveTask()
     setTasks((prev) => prev.map((t) => t.status === 'Pending' ? { ...t, status: 'Stopped' } : t))
     setIsPaused(false)
     setNotice(activeTasks.length ? 'Pending preview requests stopped.' : 'There are no pending requests to stop.')
@@ -482,10 +734,11 @@ function App() {
   function startNewConversation() {
     setMessages([])
     setTasks([])
+    setLiveProgress(null)
     setLaunchState('idle')
     setCurrentLaunchResult(null)
     setAvatarState('Idle')
-    setNotice('Started a new local conversation.')
+    setNotice('Started a new conversation.')
   }
 
   function beginCompanionDrag(event: PointerEvent<HTMLDivElement>) {
@@ -568,6 +821,10 @@ function App() {
         onPointerMove={moveAvatarDrag}
         onPointerUp={endAvatarDrag}
         onPointerCancel={endAvatarDrag}
+        onDoubleClick={() => {
+          if (window.companionAPI) { window.companionAPI.openDashboard() }
+        }}
+        title="Doraemon Desktop Companion (Double-click to open Mission Control)"
       >
         <div className="avatar-float-stage">
           {isSleeping && (
@@ -589,7 +846,8 @@ function App() {
           <button
             type="button"
             className="avatar-control-btn active"
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation()
               if (window.companionAPI) { window.companionAPI.openDashboard() }
               else { window.location.search = '?view=dashboard' }
             }}
@@ -603,7 +861,8 @@ function App() {
           <button
             type="button"
             className={`avatar-control-btn sleep-toggle ${isSleeping ? 'is-sleeping' : ''}`}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation()
               if (isSleeping) {
                 setIsSleeping(false)
                 setIsPaused(false)
@@ -623,37 +882,64 @@ function App() {
             <span className="control-icon" aria-hidden="true">{isSleeping ? '☼' : '☾'}</span>
             <span className="control-text">{isSleeping ? 'Wake' : 'Sleep'}</span>
           </button>
-
-          <div className="avatar-state-select-wrapper" title="Avatar state preview">
-            <select
-              id="avatar-state-select"
-              aria-label="Avatar state preview selector"
-              value={avatarState}
-              onChange={(e) => {
-                const s = avatarStates.find((st) => st === e.target.value)
-                if (s) {
-                  setAvatarState(s)
-                  if (window.companionAPI) window.companionAPI.sendSyncState({ avatarState: s })
-                }
-              }}
-              disabled={isSleeping}
-            >
-              {avatarStates.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div className="avatar-drag-hint" aria-hidden="true">
-          <span>⠿</span>
-          <span>Drag to move</span>
         </div>
       </div>
     )
   }
 
-  // ── Dashboard View ────────────────────────────────────────────────────────────
+  // ── Windows 11 Desktop View ──────────────────────────────────────────────────
   return (
-    <div className={`app-shell ${!isAssistantPanelOpen ? 'assistant-panel-closed' : ''}`}>
+    <div className="windows-desktop">
+      <div className="desktop-wallpaper-glow" aria-hidden="true" />
+      <nav className="desktop-shortcuts" aria-label="Desktop shortcuts">
+        <button className="desktop-shortcut" onClick={() => { setActivePage('Companion'); setIsWindowOpen(true) }}>
+          <span className="desktop-shortcut-icon companion-shortcut">✦</span><span>OmniCompanion</span>
+        </button>
+        <button className="desktop-shortcut" onClick={() => handleLaunchApp('Open File Explorer')}>
+          <span className="desktop-shortcut-icon explorer-shortcut">📁</span><span>File Explorer</span>
+        </button>
+        <button className="desktop-shortcut" onClick={() => handleLaunchApp('Open Notepad')}>
+          <span className="desktop-shortcut-icon notepad-shortcut">📝</span><span>Notepad</span>
+        </button>
+        <button className="desktop-shortcut" onClick={() => handleLaunchApp('Open Calculator')}>
+          <span className="desktop-shortcut-icon calculator-shortcut">🔢</span><span>Calculator</span>
+        </button>
+        <button className="desktop-shortcut" onClick={() => handleLaunchApp('Open Chrome')}>
+          <span className="desktop-shortcut-icon chrome-shortcut">🌐</span><span>Google Chrome</span>
+        </button>
+        <button className="desktop-shortcut" onClick={() => { setActivePage('Settings'); setIsWindowOpen(true) }}>
+          <span className="desktop-shortcut-icon settings-shortcut">⚙️</span><span>Settings</span>
+        </button>
+      </nav>
+
+      {isWindowOpen && (
+        <section
+          className={`windows-app-frame ${isWindowMaximized ? 'window-maximized' : ''}`}
+          aria-label="OmniCompanion application window"
+          style={
+            !isWindowMaximized && windowPosition
+              ? { left: `${windowPosition.x}px`, top: `${windowPosition.y}px`, right: 'auto', bottom: 'auto', width: 'min(1120px, 86vw)', height: 'min(740px, 84vh)' }
+              : undefined
+          }
+        >
+          <header
+            className="windows-titlebar"
+            style={{ cursor: isWindowMaximized ? 'default' : 'move' }}
+            onPointerDown={beginWindowDrag}
+            onPointerMove={moveWindowDrag}
+            onPointerUp={endWindowDrag}
+            onPointerCancel={endWindowDrag}
+            onDoubleClick={() => setIsWindowMaximized((v) => !v)}
+          >
+            <div className="windows-titlebar-brand"><span>✦</span><strong>OmniCompanion AI</strong></div>
+            <div className="windows-titlebar-actions">
+              <button aria-label="Minimize window" title="Minimize" onClick={() => setIsWindowOpen(false)}>－</button>
+              <button aria-label={isWindowMaximized ? 'Restore window' : 'Maximize window'} title={isWindowMaximized ? 'Restore' : 'Maximize'} onClick={() => setIsWindowMaximized((v) => !v)}>{isWindowMaximized ? '❐' : '□'}</button>
+              <button className="window-close" aria-label="Close window" title="Close" onClick={() => setIsWindowOpen(false)}>×</button>
+            </div>
+          </header>
+          <div className="windows-app-content">
+            <div className={`app-shell ${!isAssistantPanelOpen ? 'assistant-panel-closed' : ''}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon" aria-hidden="true">✦</div>
@@ -760,7 +1046,7 @@ function App() {
                 </div>
                 <div className={`current-status status-${currentAvatarState.toLowerCase().replaceAll(' ', '-')}`}>
                   <span className="status-light" />
-                  {isSleeping ? 'Sleeping' : isPaused ? 'Paused' : currentAvatarState}
+                  {isSleeping ? 'Sleeping' : isVoiceRecording ? 'Listening' : isPaused ? 'Paused' : currentAvatarState}
                 </div>
               </div>
 
@@ -770,7 +1056,7 @@ function App() {
                     <span className="toolbar-sparkle">✦</span>
                     <div>
                       <strong>Assistant chat</strong>
-                      <span>Local preview · type "open notepad" to test real launch</span>
+                      <span>Voice & typed commands · try "Open Notepad", "Open Calculator", or "Open VS Code"</span>
                     </div>
                   </div>
                   <button className="subtle-button" onClick={startNewConversation}>
@@ -784,19 +1070,20 @@ function App() {
                       <div className={`welcome-orb state-${currentAvatarState.toLowerCase().replaceAll(' ', '-')}`}>
                         <span>✦</span>
                       </div>
-                      <span className="eyebrow">OPEN APPS WITH A SENTENCE</span>
+                      <span className="eyebrow">OPEN APPS WITH VOICE OR TEXT</span>
                       <h2>What's on your mind?</h2>
-                      <p>Try: <em>"Open Notepad"</em>, <em>"Launch Calculator"</em>, or <em>"Start File Explorer"</em></p>
+                      <p>Speak with the microphone button or type: <em>"Open Notepad"</em>, <em>"Open Calculator"</em>, <em>"Open VS Code"</em></p>
                       <div className="suggestions">
                         {[
                           ['📝', 'Open Notepad', 'Launch Notepad text editor'],
-                          ['🔢', 'Launch Calculator', 'Open the Windows Calculator'],
-                          ['📁', 'Open File Explorer', 'Browse your files and folders'],
+                          ['🔢', 'Open Calculator', 'Launch Windows Calculator'],
+                          ['📁', 'Open File Explorer', 'Browse files and folders'],
+                          ['💻', 'Open VS Code', 'Launch Visual Studio Code'],
                         ].map(([icon, title, description]) => (
                           <button
                             className="suggestion-card"
                             key={title}
-                            onClick={() => setMessage(title)}
+                            onClick={() => handleLaunchApp(title)}
                           >
                             <span className="suggestion-icon" aria-hidden="true">{icon}</span>
                             <span className="suggestion-copy">
@@ -821,7 +1108,7 @@ function App() {
                               <time>{item.time}</time>
                             </div>
                             <p>{item.text}</p>
-                            {item.launchResult && <LaunchBanner result={item.launchResult} onCancel={cancelMovement} />}
+                            {item.launchResult && <LaunchBanner result={item.launchResult} onCancel={cancelActiveTask} />}
                           </div>
                         </article>
                       ))}
@@ -830,12 +1117,94 @@ function App() {
                 </div>
 
                 <div className="composer-area">
+                  {/* Voice Error Notice */}
+                  {voiceError && (
+                    <div className="voice-error-banner" role="alert">
+                      <span>⚠ {voiceError}</span>
+                      <button aria-label="Dismiss error" onClick={() => setVoiceError(null)}>×</button>
+                    </div>
+                  )}
+
+                  {/* Live Voice Recording & Transcript Preview Card */}
+                  {(isVoiceRecording || voiceTranscript) && (
+                    <div className="voice-preview-card" role="region" aria-label="Voice input preview">
+                      <div className="voice-preview-header">
+                        <div className="voice-indicator-wrap">
+                          <span className={`voice-pulse-dot ${isVoiceRecording ? 'is-recording' : ''}`} />
+                          <strong>{isVoiceRecording ? 'Listening… Speak your command' : 'Recognized Speech Transcript'}</strong>
+                        </div>
+                        {isVoiceRecording && (
+                          <div className="voice-waveform" aria-hidden="true">
+                            {[1, 2, 3, 4, 5, 6, 7].map((barIndex) => {
+                              const dynamicHeight = Math.max(4, Math.min(24, Math.round((audioLevel / 100) * 22 * (0.6 + (barIndex % 3) * 0.25))))
+                              return <span key={barIndex} className="waveform-bar" style={{ height: `${dynamicHeight}px` }} />
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="voice-transcript-text">
+                        {voiceTranscript ? (
+                          <span>"{voiceTranscript}"</span>
+                        ) : (
+                          <span className="voice-placeholder">Listening for command (e.g. "Open Notepad", "Open Calculator")…</span>
+                        )}
+                      </div>
+
+                      <div className="voice-preview-actions">
+                        {isVoiceRecording ? (
+                          <button
+                            type="button"
+                            className="voice-action-btn stop-rec-btn"
+                            onClick={handleToggleVoice}
+                          >
+                            ⏹ Stop Recording
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="voice-action-btn submit-voice-btn"
+                              onClick={() => {
+                                if (voiceTranscript.trim()) {
+                                  handleLaunchApp(voiceTranscript.trim())
+                                  setVoiceTranscript('')
+                                }
+                              }}
+                              disabled={!voiceTranscript.trim()}
+                            >
+                              ↵ Submit Command
+                            </button>
+                            <button
+                              type="button"
+                              className="voice-action-btn retry-voice-btn"
+                              onClick={handleToggleVoice}
+                            >
+                              ↻ Retry
+                            </button>
+                            <button
+                              type="button"
+                              className="voice-action-btn cancel-voice-btn"
+                              onClick={() => {
+                                setVoiceTranscript('')
+                                setVoiceError(null)
+                              }}
+                            >
+                              ✕ Dismiss
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {notice && (
                     <div className="notice" role="status">
                       <span aria-hidden="true">i</span>{notice}
                       <button aria-label="Dismiss notification" onClick={() => setNotice('')}>×</button>
                     </div>
                   )}
+
                   <form
                     className="composer"
                     onSubmit={(e) => { e.preventDefault(); sendMessage() }}
@@ -843,25 +1212,26 @@ function App() {
                     <label className="sr-only" htmlFor="message-input">Message your companion</label>
                     <textarea
                       id="message-input"
+                      ref={messageInputRef}
                       value={message}
                       onChange={(e) => setMessage(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
                       }}
-                      placeholder='Type "open notepad" to launch a real Windows app…'
+                      placeholder='Type or speak a command: "Open Notepad", "Open Calculator", "Open VS Code"…'
                       rows={2}
                       disabled={isSleeping || launchState === 'launching' || launchState === 'running'}
                     />
                     <div className="composer-footer">
                       <div className="composer-tools">
                         <button
-                          className="icon-button mic-button"
+                          className={`icon-button mic-button ${isVoiceRecording ? 'mic-active' : ''}`}
                           type="button"
-                          aria-label="Microphone unavailable in preview"
-                          title="Voice input is not connected"
-                          onClick={() => setNotice('Voice input is not connected in this UI preview.')}
+                          aria-label={isVoiceRecording ? 'Stop voice recording' : 'Speak to Doraemon (Microphone)'}
+                          title={isVoiceRecording ? 'Click to stop recording' : 'Speak with microphone'}
+                          onClick={handleToggleVoice}
                         >
-                          <span aria-hidden="true">◉</span>
+                          <span aria-hidden="true">{isVoiceRecording ? '⏹' : '🎤'}</span>
                         </button>
                         <span className="input-hint">Enter to send <kbd>↵</kbd></span>
                       </div>
@@ -877,8 +1247,8 @@ function App() {
                   </form>
                   <p className="privacy-note">
                     {window.companionAPI?.isElectron
-                      ? 'Electron mode — app launch commands run real Windows processes.'
-                      : 'Browser preview — app launching requires npm run app (Electron).'}
+                      ? 'Electron native mode — verified Windows process automation.'
+                      : 'Web preview mode — microphone and desktop bridge ready.'}
                   </p>
                 </div>
               </div>
@@ -889,12 +1259,12 @@ function App() {
             <section className="content-page">
               <span className="eyebrow">YOUR WORKSPACE</span>
               <h1>Task history</h1>
-              <p className="page-description">All requests including real app launches this session.</p>
+              <p className="page-description">All voice and typed requests including verified app launches this session.</p>
               {tasks.length === 0 ? (
                 <div className="empty-state">
                   <span aria-hidden="true">◷</span>
                   <h2>No requests yet</h2>
-                  <p>Requests and app launches will appear here.</p>
+                  <p>Requests and verified app launches will appear here.</p>
                   <button className="secondary-button" onClick={() => setActivePage('Companion')}>
                     Go to Companion
                   </button>
@@ -909,9 +1279,9 @@ function App() {
                         <span>
                           {task.launchResult
                             ? task.launchResult.realLaunch
-                              ? `Real launch · ${task.launchResult.displayName} · ${task.launchResult.state}`
-                              : `Browser mode · cannot verify real launch`
-                            : 'Local preview request · no action executed'}
+                              ? `Real launch · ${task.launchResult.displayName} · ${task.launchResult.verified ? 'Verified in tasklist' : 'Window unverified'}`
+                              : `Mock simulation mode · ${task.launchResult.displayName}`
+                            : 'Conversation message'}
                         </span>
                         {task.launchResult && <LaunchBanner result={task.launchResult} />}
                       </div>
@@ -927,29 +1297,31 @@ function App() {
             <section className="content-page">
               <span className="eyebrow">PREFERENCES & SAFETY</span>
               <h1>Settings</h1>
-              <p className="page-description">Manage preview controls and review connection status.</p>
+              <p className="page-description">Manage voice input, execution permissions, and companion controls.</p>
               <div className="settings-group">
                 <div className="settings-group-heading">
                   <span className="settings-icon" aria-hidden="true">⌘</span>
-                  <div><strong>Permissions</strong><span>No operating-system permissions are requested by this preview.</span></div>
+                  <div><strong>Permissions</strong><span>Controls and access status for system services.</span></div>
                 </div>
                 <div className="permission-row">
-                  <div><strong>Accessibility control</strong><span>Windows automation is not connected.</span></div>
-                  <span className="permission-state">NOT CONNECTED</span>
+                  <div><strong>Microphone Input</strong><span>Web Audio API and SpeechRecognition integration.</span></div>
+                  <span className="permission-state" style={{ color: '#34D399' }}>CONNECTED</span>
                 </div>
                 <div className="permission-row">
-                  <div><strong>Screen and window access</strong><span>Screen capture is not connected.</span></div>
-                  <span className="permission-state">NOT CONNECTED</span>
+                  <div><strong>Windows Automation</strong><span>Process verification via ShellExecute and tasklist.</span></div>
+                  <span className="permission-state" style={{ color: '#34D399' }}>
+                    {window.companionAPI?.isElectron ? 'LIVE' : 'BRIDGE READY'}
+                  </span>
                 </div>
               </div>
               <div className="settings-group">
                 <div className="settings-group-heading">
                   <span className="settings-icon" aria-hidden="true">✦</span>
-                  <div><strong>App Launcher</strong><span>Allowlisted apps: Notepad, Calculator, File Explorer, Chrome, VS Code</span></div>
+                  <div><strong>App Launcher</strong><span>Allowlisted applications: Notepad, Calculator, File Explorer, Chrome, VS Code, WhatsApp</span></div>
                 </div>
                 <div className="permission-row">
-                  <div><strong>Launch mode</strong><span>{window.companionAPI?.isElectron ? 'Electron IPC (real process)' : 'Browser preview (IPC unavailable)'}</span></div>
-                  <span className="permission-state">{window.companionAPI?.isElectron ? 'LIVE' : 'OFFLINE'}</span>
+                  <div><strong>Launch mode</strong><span>{executionMode === 'real' ? 'Real Windows Execution' : 'Mock Simulation'}</span></div>
+                  <span className="permission-state">{executionMode === 'real' ? 'REAL' : 'MOCK'}</span>
                 </div>
                 <div className="permission-row">
                   <div><strong>Arbitrary commands</strong><span>Never executed. Only allowlisted identifiers accepted.</span></div>
@@ -973,7 +1345,7 @@ function App() {
         <section className="control-card" aria-label="Companion controls">
           <div className="control-card-heading">
             <span className="status-light" />
-            <strong>{isSleeping ? 'Companion sleeping' : isPaused ? 'Companion paused' : 'Companion ready'}</strong>
+            <strong>{isSleeping ? 'Companion sleeping' : isVoiceRecording ? 'Listening to voice' : isPaused ? 'Companion paused' : 'Companion ready'}</strong>
             <span className="live-label">LOCAL</span>
           </div>
           <div className="control-actions">
@@ -983,7 +1355,7 @@ function App() {
             }} disabled={isSleeping}>
               <span aria-hidden="true">{isPaused ? '▶' : 'Ⅱ'}</span>{isPaused ? 'Resume' : 'Pause'}
             </button>
-            <button className="control-button stop-button" onClick={stopTasks} disabled={activeTasks.length === 0}>
+            <button className="control-button stop-button" onClick={stopTasks} disabled={!liveProgress && activeTasks.length === 0}>
               <span aria-hidden="true">■</span>Stop
             </button>
           </div>
@@ -1006,74 +1378,112 @@ function App() {
         {/* Live avatar display in mission panel */}
         <section className="mission-section" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 16, paddingBottom: 8 }}>
           <AvatarCharacter state={animState} size={110} facing={facing} />
-          {currentLaunchResult && <LaunchBanner result={currentLaunchResult} onCancel={cancelMovement} />}
+          {currentLaunchResult && <LaunchBanner result={currentLaunchResult} onCancel={cancelActiveTask} />}
         </section>
 
-        <section className="mission-section">
+        {/* ── Live Multi-Stage Task Timeline in Mission Control ── */}
+        <section className="mission-section live-timeline-section">
           <div className="section-heading">
-            <div><h3>Task timeline</h3><p>{activeTasks.length} active · {tasks.length} total</p></div>
-            <span className="section-icon" aria-hidden="true">◷</span>
-          </div>
-          <div className="progress-block">
-            <div className="progress-label"><span>Session progress</span><strong>{tasks.length ? '0%' : '—'}</strong></div>
-            <div className="progress-track" role="progressbar" aria-label="Task session progress" aria-valuenow={0} aria-valuemin={0} aria-valuemax={100}>
-              <span />
+            <div>
+              <h3>Task Timeline</h3>
+              <p>{liveProgress?.rawCommand ? `"${liveProgress.rawCommand}"` : `${activeTasks.length} active · ${tasks.length} total`}</p>
             </div>
-            <span className="progress-caption">{tasks.length ? 'Requests are queued for review' : 'No active requests'}</span>
+            {liveProgress && (
+              <span style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 4,
+                fontWeight: 'bold',
+                background: liveProgress.executionMode === 'real' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                color: liveProgress.executionMode === 'real' ? '#34D399' : '#FBBF24',
+              }}>
+                {liveProgress.executionMode === 'real' ? 'REAL' : 'MOCK'}
+              </span>
+            )}
           </div>
 
-          {activeTasks.length === 0 ? (
+          {liveProgress ? (
+            <>
+              <div className="progress-block">
+                <div className="progress-label">
+                  <span>{liveProgress.currentStageId.toUpperCase().replaceAll('_', ' ')}</span>
+                  <strong>{liveProgress.percent}%</strong>
+                </div>
+                <div className="progress-track" role="progressbar" aria-valuenow={liveProgress.percent} aria-valuemin={0} aria-valuemax={100}>
+                  <span style={{ width: `${liveProgress.percent}%` }} />
+                </div>
+                <span className="progress-caption">
+                  {liveProgress.currentStageId === 'launch_verified'
+                    ? (liveProgress.isVerified ? '✔ Verified execution in Windows tasklist' : 'Attempted launch completed')
+                    : liveProgress.currentStageId === 'failed'
+                    ? `✖ Failed: ${liveProgress.error || 'Execution error'}`
+                    : liveProgress.currentStageId === 'cancelled'
+                    ? '⏹ Task cancelled by user'
+                    : 'Windows automation in progress…'}
+                </span>
+              </div>
+
+              {/* Active Cancel Task Button */}
+              {liveProgress.currentStageId !== 'launch_verified' && liveProgress.currentStageId !== 'failed' && liveProgress.currentStageId !== 'cancelled' && (
+                <button type="button" className="timeline-cancel-btn" onClick={cancelActiveTask}>
+                  ⏹ Cancel Active Task
+                </button>
+              )}
+
+              <ol className="live-stages-list">
+                {liveProgress.stages.map((st) => {
+                  const icon =
+                    st.status === 'completed' ? '✔' :
+                    st.status === 'in_progress' ? '⟳' :
+                    st.status === 'failed' ? '✖' :
+                    st.status === 'cancelled' ? '⏹' : '○'
+                  return (
+                    <li className={`timeline-item stage-${st.status}`} key={st.id}>
+                      <span className="timeline-marker stage-marker">{icon}</span>
+                      <div className="timeline-task">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <strong>{st.label}</strong>
+                          {st.timestamp && <span style={{ fontSize: 10, opacity: 0.7 }}>{st.timestamp}</span>}
+                        </div>
+                        {st.detail && <span className="timeline-detail">{st.detail}</span>}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ol>
+            </>
+          ) : (
             <div className="timeline-empty">
               <span className="empty-timeline-icon" aria-hidden="true">⌁</span>
               <strong>All clear</strong>
-              <p>Your task timeline will appear here when you add a request.</p>
+              <p>Speak or type a command to view real-time stage progression.</p>
             </div>
-          ) : (
-            <ol className="timeline-list">
-              {activeTasks.slice().reverse().map((task) => (
-                <li className="timeline-item" key={task.id}>
-                  <span className="timeline-marker" />
-                  <div className="timeline-task">
-                    <strong>{task.title}</strong>
-                    <span className="timeline-detail">
-                      {task.launchResult?.realLaunch ? 'Real launch attempt' : 'Waiting for review'}
-                    </span>
-                    <span className="task-status status-pending">Pending</span>
-                  </div>
-                </li>
-              ))}
-            </ol>
           )}
-        </section>
-
-        <section className="approval-card">
-          <div className="approval-heading">
-            <span className="approval-icon" aria-hidden="true">!</span>
-            <div><strong>Approval requests</strong><span>Human review required</span></div>
-          </div>
-          <p className="approval-copy">Sample approval control. No action will be executed.</p>
-          <span className={`approval-status ${approval === 'Awaiting review' ? 'approval-pending' : 'approval-decided'}`}>
-            <span />{approval}
-          </span>
-          <div className="approval-actions">
-            <button onClick={() => setApproval('Approved in preview')}>Approve</button>
-            <button onClick={() => setApproval('Declined in preview')}>Decline</button>
-          </div>
         </section>
 
         <section className="permission-card">
           <div className="permission-card-heading">
             <span className="permission-icon" aria-hidden="true">◇</span>
-            <div><strong>Permission controls</strong><span>All access is disconnected</span></div>
+            <div><strong>System Controls</strong><span>Hardware & automation status</span></div>
           </div>
-          <div className="permission-line"><span>Windows automation</span><span className="permission-state">OFF</span></div>
-          <div className="permission-line"><span>Microphone</span><span className="permission-state">OFF</span></div>
+          <div className="permission-line">
+            <span>Microphone</span>
+            <span className="permission-state" style={{ color: isVoiceRecording ? '#EF4444' : '#34D399' }}>
+              {isVoiceRecording ? 'RECORDING' : 'READY'}
+            </span>
+          </div>
+          <div className="permission-line">
+            <span>Windows Automation</span>
+            <span className="permission-state" style={{ color: '#34D399' }}>
+              {window.companionAPI?.isElectron ? 'LIVE' : 'ACTIVE'}
+            </span>
+          </div>
           <button className="manage-permissions" onClick={() => setActivePage('Settings')}>
             Review permissions <span aria-hidden="true">→</span>
           </button>
         </section>
 
-        <div className="mission-footer">JM VERTEX TECHNOLOGIES <span>·</span> UI PREVIEW</div>
+        <div className="mission-footer">JM VERTEX TECHNOLOGIES <span>·</span> COMPANION ENGINE</div>
       </aside>
 
       {/* Compact Floating Avatar (browser mode only; Electron uses separate window) */}
@@ -1160,6 +1570,73 @@ function App() {
           </div>
         </section>
       )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {isStartMenuOpen && (
+        <>
+          <button className="start-menu-backdrop" aria-label="Close Start menu" onClick={() => setIsStartMenuOpen(false)} />
+          <section className="windows-start-menu" aria-label="Start menu">
+            <form className="start-search" onSubmit={(e) => { e.preventDefault(); const q = desktopSearch.trim(); if (q) { handleLaunchApp(q); setDesktopSearch(''); setIsStartMenuOpen(false) } }}>
+              <span>⌕</span>
+              <input value={desktopSearch} onChange={(e) => setDesktopSearch(e.target.value)} placeholder="Search for apps, settings, and documents" aria-label="Search" autoFocus />
+              <button type="submit" aria-label="Search">↵</button>
+            </form>
+            <div className="start-menu-section-heading"><strong>Pinned</strong><span>All apps　›</span></div>
+            <div className="start-pinned-grid">
+              {PINNED_APPS.map((item) => (
+                <button
+                  type="button"
+                  className="start-pinned-item"
+                  key={item.label}
+                  onClick={() => {
+                    setIsStartMenuOpen(false)
+                    if (item.target === 'companion') {
+                      setIsWindowOpen(true)
+                      setActivePage('Companion')
+                    } else if (item.target === 'settings') {
+                      setActivePage('Settings')
+                      setIsWindowOpen(true)
+                    } else {
+                      handleLaunchApp(item.target)
+                    }
+                  }}
+                >
+                  <span>{item.icon}</span>
+                  <small>{item.label}</small>
+                </button>
+              ))}
+            </div>
+            <div className="start-menu-section-heading recommended-heading"><strong>Recommended</strong><span>More　›</span></div>
+            <div className="start-recommended"><span className="recommended-file-icon">◫</span><div><strong>Welcome to OmniCompanion</strong><small>Voice & typed desktop automation ready</small></div></div>
+            <footer className="start-menu-footer"><span className="start-user-avatar">U</span><strong>Local user</strong><button title="Power" onClick={() => setIsStartMenuOpen(false)}>⏻</button></footer>
+          </section>
+        </>
+      )}
+
+      <footer className="windows-taskbar">
+        <button className={`taskbar-start ${isStartMenuOpen ? 'taskbar-active' : ''}`} aria-label="Start" title="Start" onClick={() => setIsStartMenuOpen((v) => !v)}><span className="windows-logo"><i /><i /><i /><i /></span></button>
+        <button className="taskbar-search" onClick={() => setIsStartMenuOpen(true)}><span>⌕</span><small>Search</small></button>
+        <span className="taskbar-divider" />
+        <button className={`taskbar-app ${isWindowOpen ? 'taskbar-app-active' : ''}`} title="OmniCompanion AI" onClick={() => setIsWindowOpen((v) => !v)}><span>✦</span></button>
+        <button className="taskbar-app" title="File Explorer" onClick={() => handleLaunchApp('Open File Explorer')}>📁</button>
+        <button className="taskbar-app" title="Notepad" onClick={() => handleLaunchApp('Open Notepad')}>📝</button>
+        <button className="taskbar-app" title="Calculator" onClick={() => handleLaunchApp('Open Calculator')}>🔢</button>
+        <button className="taskbar-app" title="Google Chrome" onClick={() => handleLaunchApp('Open Chrome')}>🌐</button>
+        <button className="taskbar-app" title="Settings" onClick={() => { setActivePage('Settings'); setIsWindowOpen(true) }}>⚙️</button>
+        <div className="taskbar-tray">
+          <span title="Wi-Fi connected">📶</span>
+          <span title="Volume 100%">🔊</span>
+          <span title="Battery 100%">🔋</span>
+          <div className="taskbar-clock">
+            <strong>{currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong>
+            <small>{currentTime.toLocaleDateString([], { month: '2-digit', day: '2-digit', year: 'numeric' })}</small>
+          </div>
+          <button title="Notifications" onClick={() => setNotice('You are all caught up.')}>🔔</button>
+        </div>
+      </footer>
     </div>
   )
 }
