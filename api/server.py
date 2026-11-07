@@ -197,6 +197,67 @@ def process_command(payload: CommandInput):
         }
 
 
+@app.get("/api/launch-app")
+@app.post("/api/launch-app")
+def launch_app_endpoint(appId: Optional[str] = None, target: Optional[str] = None):
+    """
+    Endpoint consumed by Doraemon UI in browser preview mode.
+    Accepts appId query param or target and returns IpcLaunchResult format.
+    """
+    query_target = appId or target or ""
+    if not query_target:
+        return {
+            "success": False,
+            "verified": False,
+            "displayName": "",
+            "mode": "not-found",
+            "error": "No application identifier provided.",
+        }
+
+    resolution = catalogue.resolve(query_target)
+    if resolution.status == "ambiguous":
+        cand_names = [c.display_name for c in resolution.candidates]
+        return {
+            "success": False,
+            "verified": False,
+            "displayName": query_target,
+            "mode": "not-allowed",
+            "error": f"Multiple applications matched '{query_target}': {', '.join(cand_names)}. Please specify.",
+        }
+
+    if resolution.status == "unresolved":
+        return {
+            "success": False,
+            "verified": False,
+            "displayName": query_target,
+            "mode": "not-found",
+            "error": f"No installed application found matching '{query_target}'.",
+        }
+
+    exec_result = adapter.execute_application_launch(query_target)
+    if exec_result.status == "completed":
+        details = (exec_result.verification.details if exec_result.verification else {}) or {}
+        pid = details.get("window_pid") or details.get("process_id")
+        win_title = details.get("window_title")
+        pid_info = f" (PID: {pid})" if pid else ""
+        return {
+            "success": True,
+            "verified": exec_result.verification_status == "launch_verified",
+            "displayName": resolution.matched_record.display_name,
+            "mode": "real",
+            "message": f"Successfully launched and verified {resolution.matched_record.display_name}{pid_info}.",
+            "error": None,
+        }
+    else:
+        return {
+            "success": False,
+            "verified": False,
+            "displayName": resolution.matched_record.display_name if resolution.matched_record else query_target,
+            "mode": "real",
+            "error": exec_result.error_message or exec_result.error_code or "Application launch failed.",
+        }
+
+
 @app.post("/api/launch")
 def direct_launch(payload: LaunchInput):
     """Direct application launch endpoint."""

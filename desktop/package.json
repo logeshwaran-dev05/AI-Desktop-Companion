@@ -8,8 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "electron": "electron ./electron/main.cjs",
-    "app": "node -e \"try{require('fs').unlinkSync('dev-server-url.txt')}catch(e){}\" && concurrently -k \"vite\" \"wait-on dev-server-url.txt && electron ./electron/main.cjs\""
+    "electron": "node ./electron/run-electron.cjs",
+    "app": "node -e \"try{require('fs').unlinkSync('dev-server-url.txt')}catch(e){}\" && concurrently -k \"vite\" \"wait-on dev-server-url.txt && node ./electron/run-electron.cjs\""
   },
   "dependencies": {
     "react": "^19.3.1",
