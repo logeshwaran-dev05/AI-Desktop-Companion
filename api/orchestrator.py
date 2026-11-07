@@ -466,8 +466,11 @@ class TaskOrchestrator:
             task["completed_at"] = current_iso_timestamp()
             return task
 
-        # If initially listening, advance to processing
+        # If initially listening, wait for voice transcript unless command is provided
         if task["status"] == "listening":
+            if not command or not command.strip():
+                task["message"] = "Listening for voice input audio."
+                return task
             self.state_machine.transition(task, "processing", "Voice input captured. Transcribing and extracting intent.")
 
         # Step 4: AI Intent Extraction
