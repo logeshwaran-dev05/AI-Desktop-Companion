@@ -213,5 +213,6 @@ export function resolveAppIntent(text: string): { appId: string; displayName: st
 
 /** Check whether the text looks like a "launch / open application" intent */
 export function isLaunchIntent(text: string): boolean {
-  return /\b(open|launch|start|run|show|access)\b/i.test(text)
+  if (/\b(open|launch|start|run|show|access)\b/i.test(text)) return true
+  return resolveAppIntent(text) !== null
 }

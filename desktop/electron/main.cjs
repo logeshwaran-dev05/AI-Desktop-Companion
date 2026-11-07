@@ -24,8 +24,7 @@ if (!gotTheLock) {
       dashboardWindow.show();
       dashboardWindow.focus();
     }
-    if (avatarWindow && !avatarWindow.isDestroyed()) {
-      avatarWindow.show();
+    if (avatarWindow && !avatarWindow.isDestroyed() && avatarWindow.isVisible()) {
     }
   });
 }
@@ -255,8 +254,8 @@ function createTray() {
         }
       } else {
         if (!avatarWindow || avatarWindow.isDestroyed()) {
-          createAvatarWindow();
-        } else {
+                createAvatarWindow();
+              } else {
           avatarWindow.show();
           avatarWindow.setAlwaysOnTop(true, 'screen-saver');
         }
@@ -428,6 +427,9 @@ ipcMain.handle('companion:open-dashboard', () => {
     dashboardWindow.show();
     dashboardWindow.focus();
   }
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.hide();
+  }
   return true;
 });
 
@@ -446,6 +448,9 @@ ipcMain.handle('companion:sleep-avatar', () => {
 });
 
 ipcMain.handle('companion:wake-avatar', () => {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.hide();
+  }
   if (!avatarWindow || avatarWindow.isDestroyed()) {
     createAvatarWindow();
   } else {
@@ -500,16 +505,14 @@ ipcMain.handle('companion:sync-state', (_event, data) => {
 });
 
 app.whenReady().then(() => {
-  console.log('[Electron] Application ready. Initializing Dashboard, Floating Avatar, and System Tray...');
+  console.log('[Electron] Application ready. Initializing Dashboard and System Tray...');
   createDashboardWindow();
-  createAvatarWindow();
   createTray();
-  console.log('[Electron] Windows and tray created successfully.');
+  console.log('[Electron] Started with single Doraemon companion.');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createDashboardWindow();
-      createAvatarWindow();
     }
   });
 });

@@ -170,6 +170,16 @@ const PINNED_APPS: PinnedAppItem[] = [
   { icon: '⚙️', label: 'Settings', target: 'settings' },
 ]
 
+const DESKTOP_SHORTCUT_TARGETS: Record<string, { x: number; y: number }> = {
+  explorer: { x: 30, y: 95 },
+  notepad: { x: 30, y: 185 },
+  calculator: { x: 30, y: 275 },
+  chrome: { x: 30, y: 365 },
+  settings: { x: 30, y: 455 },
+  vscode: { x: 30, y: 220 },
+  whatsapp: { x: 30, y: 310 },
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
@@ -214,11 +224,21 @@ function App() {
   const [currentLaunchResult, setCurrentLaunchResult] = useState<LaunchResult | null>(null)
   const [facing, setFacing]             = useState<'left' | 'right'>('right')
   const [executionMode, setExecutionMode] = useState<'real' | 'mock'>('real')
+  const [isDragging, setIsDragging]     = useState(false)
 
   const dragOrigin      = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
   const avatarDragStart = useRef<{ x: number; y: number } | null>(null)
   const windowDragStart = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number } | null>(null)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
+  const voiceAutoEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latestSpeechRef = useRef<string>('')
+
+  const clearVoiceAutoEndTimer = useCallback(() => {
+    if (voiceAutoEndTimerRef.current) {
+      clearTimeout(voiceAutoEndTimerRef.current)
+      voiceAutoEndTimerRef.current = null
+    }
+  }, [])
 
   // Clock interval
   useEffect(() => {
@@ -229,9 +249,10 @@ function App() {
   // Clean up any ongoing voice listening session on unmount
   useEffect(() => {
     return () => {
+      clearVoiceAutoEndTimer()
       voiceService.stopListening()
     }
-  }, [])
+  }, [clearVoiceAutoEndTimer])
 
   // ── Sync state from Electron main process ───────────────────────────────────
   useEffect(() => {
@@ -304,10 +325,12 @@ function App() {
   // ── Cancellation Handler ────────────────────────────────────────────────────
   const cancelActiveTask = useCallback(() => {
     taskCancelledRef.current = true
+    clearVoiceAutoEndTimer()
 
     if (isVoiceRecording) {
       voiceService.stopListening()
       setIsVoiceRecording(false)
+      setAudioLevel(0)
     }
 
     if (window.companionAPI?.cancelMovement) {
@@ -341,62 +364,7 @@ function App() {
         setLaunchState('idle')
       }, 2500)
     }
-  }, [isVoiceRecording])
-
-  // ── Voice Input Handler ─────────────────────────────────────────────────────
-  const handleToggleVoice = useCallback(async () => {
-    // Focus the command input field immediately for dictation
-    if (messageInputRef.current) {
-      messageInputRef.current.focus()
-    }
-
-    if (isVoiceRecording) {
-      voiceService.stopListening()
-      setIsVoiceRecording(false)
-      setAudioLevel(0)
-      setAvatarState('Idle')
-      return
-    }
-
-    setVoiceError(null)
-    setVoiceTranscript('')
-    setIsVoiceRecording(true)
-    setAvatarState('Listening')
-
-    const started = await voiceService.startListening({
-      onTranscript: (text) => {
-        setVoiceTranscript(text)
-        setMessage(text)
-      },
-      onAudioLevel: (level) => {
-        setAudioLevel(level)
-      },
-      onNotice: (noticeMsg) => {
-        setNotice(noticeMsg)
-      },
-      onError: (err) => {
-        if (err.type === 'network') {
-          // Web speech network error is expected in Electron because Google blocks Chromium apps.
-          // Fallback to Windows Voice Typing (Win + H) notice and maintain listening state.
-          setNotice('🎤 Windows Voice Typing active (Win + H). Speak into the prompt or type commands.')
-          setAvatarState('Listening')
-        } else {
-          setVoiceError(err.message)
-          setIsVoiceRecording(false)
-          setAvatarState('Error')
-        }
-      },
-      onEnd: () => {
-        setIsVoiceRecording(false)
-        setAvatarState((prev) => (prev === 'Listening' ? 'Idle' : prev))
-      },
-    })
-
-    if (!started) {
-      setIsVoiceRecording(false)
-      setAvatarState('Idle')
-    }
-  }, [isVoiceRecording])
+  }, [clearVoiceAutoEndTimer, isVoiceRecording])
 
   // ── Helper to update Live Task Progress ─────────────────────────────────────
   const updateProgressStage = useCallback((
@@ -428,24 +396,15 @@ function App() {
     })
   }, [])
 
-  // ── Derived avatar values ───────────────────────────────────────────────────
-  const activeTasks = tasks.filter((t) => t.status === 'Pending')
-  const currentAvatarState = isSleeping ? 'Idle' : avatarState
-  const animState = toAnimState(currentAvatarState, isSleeping, launchState, isVoiceRecording)
-
-  const companionStyle: CSSProperties = floatingPosition
-    ? { position: 'fixed', left: `${floatingPosition.x}px`, top: `${floatingPosition.y}px`, right: 'auto', bottom: 'auto' }
-    : {
-        position: 'fixed',
-        bottom: '24px',
-        right: isAssistantPanelOpen ? '324px' : '36px',
-        left: 'auto',
-        top: 'auto',
-      }
-
   // ── Unified App Launch & Automation Execution Flow ──────────────────────────
   const handleLaunchApp = useCallback(async (rawText: string) => {
     taskCancelledRef.current = false
+
+    // Clear input box and voice transcript immediately so the user can type/speak again
+    setMessage('')
+    setVoiceTranscript('')
+    latestSpeechRef.current = ''
+
     const now = new Date()
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
@@ -516,7 +475,14 @@ function App() {
     // Stage 5: Launch attempted (traveling across Windows desktop)
     setLaunchState('launching')
     setAvatarState('Working')
+    setFacing('left')
+    const targetCoord = DESKTOP_SHORTCUT_TARGETS[intent.appId] || { x: 30, y: 185 }
+    setFloatingPosition(targetCoord)
     updateProgressStage('launch_attempted', 'in_progress', `Doraemon physically moving across desktop to ${intent.displayName}…`, 85)
+
+    // Allow Doraemon to visibly fly across the desktop smoothly to the target before executing
+    await new Promise((r) => setTimeout(r, 2600))
+    if (taskCancelledRef.current) return
 
     let taskResult: import('./companion').DesktopTaskResult
 
@@ -603,6 +569,8 @@ function App() {
           launchResult: result,
         },
       ])
+      setFloatingPosition(null)
+      setFacing('right')
       setTimeout(() => { setLaunchState('idle'); setAvatarState('Idle') }, 3500)
       return
     }
@@ -657,6 +625,8 @@ function App() {
       setTimeout(() => {
         setLaunchState('idle')
         setAvatarState('Idle')
+        setFacing('right')
+        setFloatingPosition(null)
         if (window.companionAPI?.returnHome) {
           window.companionAPI.returnHome()
         }
@@ -691,12 +661,139 @@ function App() {
         },
       ])
       setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Failed', time: timeStr, launchResult: result }])
-      setTimeout(() => { setLaunchState('idle'); setAvatarState('Idle') }, 5000)
+      setTimeout(() => {
+        setLaunchState('idle')
+        setAvatarState('Idle')
+        setFacing('right')
+        setFloatingPosition(null)
+      }, 4500)
     }
   }, [executionMode, updateProgressStage])
 
+  // ── Voice Input Handler with Automatic Turn-Off ─────────────────────────────
+  const handleToggleVoice = useCallback(async () => {
+    // Focus the command input field immediately for dictation
+    if (messageInputRef.current) {
+      messageInputRef.current.focus()
+    }
+
+    if (isVoiceRecording) {
+      clearVoiceAutoEndTimer()
+      voiceService.stopListening()
+      setIsVoiceRecording(false)
+      setAudioLevel(0)
+      setAvatarState('Idle')
+      return
+    }
+
+    clearVoiceAutoEndTimer()
+    latestSpeechRef.current = ''
+    setVoiceError(null)
+    setVoiceTranscript('')
+    setIsVoiceRecording(true)
+    setAvatarState('Listening')
+
+    const started = await voiceService.startListening({
+      onTranscript: (text, isFinal) => {
+        setVoiceTranscript(text)
+        setMessage(text)
+        latestSpeechRef.current = text
+
+        clearVoiceAutoEndTimer()
+
+        if (isFinal) {
+          // Final recognized speech from engine -> automatically turn off voice mode and launch
+          voiceService.stopListening()
+          setIsVoiceRecording(false)
+          setAudioLevel(0)
+          setAvatarState('Thinking')
+          handleLaunchApp(text)
+        } else {
+          // Interim speech detected -> set auto-turn-off timer (1.3s of silence)
+          voiceAutoEndTimerRef.current = setTimeout(() => {
+            const finalCmd = latestSpeechRef.current.trim()
+            if (finalCmd) {
+              voiceService.stopListening()
+              setIsVoiceRecording(false)
+              setAudioLevel(0)
+              setAvatarState('Thinking')
+              handleLaunchApp(finalCmd)
+            }
+          }, 1300)
+        }
+      },
+      onAudioLevel: (level) => {
+        setAudioLevel(level)
+      },
+      onNotice: (noticeMsg) => {
+        setNotice(noticeMsg)
+      },
+      onError: (err) => {
+        clearVoiceAutoEndTimer()
+        if (err.type === 'network') {
+          // Web speech network error is expected in Electron because Google blocks Chromium apps.
+          // Fallback to Windows Voice Typing (Win + H) notice and maintain listening state.
+          setNotice('🎤 Windows Voice Typing active (Win + H). Speak into the prompt or type commands.')
+          setAvatarState('Listening')
+        } else {
+          setVoiceError(err.message)
+          setIsVoiceRecording(false)
+          setAvatarState('Error')
+        }
+      },
+      onEnd: () => {
+        clearVoiceAutoEndTimer()
+        setIsVoiceRecording(false)
+        setAudioLevel(0)
+        const pending = latestSpeechRef.current.trim()
+        if (pending && launchState === 'idle') {
+          setAvatarState('Thinking')
+          handleLaunchApp(pending)
+        } else {
+          setAvatarState((prev) => (prev === 'Listening' ? 'Idle' : prev))
+        }
+      },
+    })
+
+    if (!started) {
+      clearVoiceAutoEndTimer()
+      setIsVoiceRecording(false)
+      setAvatarState('Idle')
+    }
+  }, [clearVoiceAutoEndTimer, handleLaunchApp, isVoiceRecording, launchState])
+
+  // ── Derived avatar values ───────────────────────────────────────────────────
+  const activeTasks = tasks.filter((t) => t.status === 'Pending')
+  const currentAvatarState = isSleeping ? 'Idle' : avatarState
+  const animState = toAnimState(currentAvatarState, isSleeping, launchState, isVoiceRecording)
+  const isMoving = launchState === 'launching' || launchState === 'running'
+
+  const currentPos = floatingPosition || {
+    x: typeof window !== 'undefined' ? Math.max(80, window.innerWidth - (isAssistantPanelOpen ? 460 : 200)) : 800,
+    y: typeof window !== 'undefined' ? Math.max(80, window.innerHeight - 250) : 500,
+  }
+
+  const companionStyle: CSSProperties = {
+    position: 'fixed',
+    left: `${currentPos.x}px`,
+    top: `${currentPos.y}px`,
+    right: 'auto',
+    bottom: 'auto',
+    zIndex: 9999,
+    transition: isDragging
+      ? 'none'
+      : 'left 2.8s cubic-bezier(0.35, 0, 0.25, 1), top 2.8s cubic-bezier(0.35, 0, 0.25, 1)',
+    pointerEvents: 'auto',
+  }
+
   // ── Send typed message / dispatch to unified task workflow ──────────────────
   function sendMessage() {
+    clearVoiceAutoEndTimer()
+    if (isVoiceRecording) {
+      voiceService.stopListening()
+      setIsVoiceRecording(false)
+      setAudioLevel(0)
+    }
     const text = message.trim()
     if (!text || isSleeping) return
     setMessage('')
@@ -747,6 +844,7 @@ function App() {
     const rect = event.currentTarget.getBoundingClientRect()
     event.currentTarget.setPointerCapture(event.pointerId)
     dragOrigin.current = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top }
+    setIsDragging(true)
   }
 
   function moveCompanion(event: PointerEvent<HTMLDivElement>) {
@@ -759,6 +857,7 @@ function App() {
   }
 
   function endCompanionDrag(event: PointerEvent<HTMLDivElement>) {
+    setIsDragging(false)
     if (dragOrigin.current) {
       try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ok */ }
       dragOrigin.current = null
@@ -1214,9 +1313,36 @@ function App() {
                       id="message-input"
                       ref={messageInputRef}
                       value={message}
-                      onChange={(e) => setMessage(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setMessage(val)
+                        if (isVoiceRecording) {
+                          latestSpeechRef.current = val
+                          setVoiceTranscript(val)
+                          clearVoiceAutoEndTimer()
+                          voiceAutoEndTimerRef.current = setTimeout(() => {
+                            const finalCmd = latestSpeechRef.current.trim()
+                            if (finalCmd) {
+                              voiceService.stopListening()
+                              setIsVoiceRecording(false)
+                              setAudioLevel(0)
+                              setAvatarState('Thinking')
+                              handleLaunchApp(finalCmd)
+                            }
+                          }, 1300)
+                        }
+                      }}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          if (isVoiceRecording) {
+                            clearVoiceAutoEndTimer()
+                            voiceService.stopListening()
+                            setIsVoiceRecording(false)
+                            setAudioLevel(0)
+                          }
+                          sendMessage()
+                        }
                       }}
                       placeholder='Type or speak a command: "Open Notepad", "Open Calculator", "Open VS Code"…'
                       rows={2}
@@ -1375,11 +1501,12 @@ function App() {
           </button>
         </section>
 
-        {/* Live avatar display in mission panel */}
-        <section className="mission-section" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 16, paddingBottom: 8 }}>
-          <AvatarCharacter state={animState} size={110} facing={facing} />
-          {currentLaunchResult && <LaunchBanner result={currentLaunchResult} onCancel={cancelActiveTask} />}
-        </section>
+        {/* Mission status & launch banner */}
+        {currentLaunchResult && (
+          <section className="mission-section" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 8, paddingBottom: 8 }}>
+            <LaunchBanner result={currentLaunchResult} onCancel={cancelActiveTask} />
+          </section>
+        )}
 
         {/* ── Live Multi-Stage Task Timeline in Mission Control ── */}
         <section className="mission-section live-timeline-section">
@@ -1485,95 +1612,77 @@ function App() {
 
         <div className="mission-footer">JM VERTEX TECHNOLOGIES <span>·</span> COMPANION ENGINE</div>
       </aside>
-
-      {/* Compact Floating Avatar (browser mode only; Electron uses separate window) */}
-      {!window.companionAPI?.isElectron && (
-        <section
-          className={`compact-floating-avatar state-${currentAvatarState.toLowerCase().replaceAll(' ', '-')} ${isSleeping ? 'is-sleeping' : ''}`}
-          style={companionStyle}
-          role="region"
-          aria-label="Floating companion avatar"
-          tabIndex={0}
-          onPointerDown={beginCompanionDrag}
-          onPointerMove={moveCompanion}
-          onPointerUp={endCompanionDrag}
-          onPointerCancel={endCompanionDrag}
-          onKeyDown={nudgeCompanion}
-        >
-          <div className={`avatar-float-stage avatar-state-${animState}`}>
-            {isSleeping && (
-              <div className="avatar-zzz-cloud" aria-hidden="true">
-                <span className="z1">z</span>
-                <span className="z2">z</span>
-                <span className="z3">Z</span>
-              </div>
-            )}
-
-            <div className="avatar-image-wrapper">
-              <AvatarCharacter state={animState} size={140} facing={facing} />
-            </div>
-
-            <div className="avatar-ground-shadow" aria-hidden="true" />
-          </div>
-
-          <div className="avatar-controls-dock" role="toolbar" aria-label="Avatar quick controls">
-            <button
-              type="button"
-              className={`avatar-control-btn ${isAssistantPanelOpen ? 'active' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                setIsAssistantPanelOpen((p) => !p)
-                if (!isAssistantPanelOpen) setActivePage('Companion')
-              }}
-              title={isAssistantPanelOpen ? 'Minimize assistant panel' : 'Open assistant panel'}
-              aria-label={isAssistantPanelOpen ? 'Minimize assistant panel' : 'Open assistant panel'}
-            >
-              <span className="control-icon" aria-hidden="true">✦</span>
-              <span className="control-text">{isAssistantPanelOpen ? 'Panel' : 'Open'}</span>
-            </button>
-
-            <button
-              type="button"
-              className={`avatar-control-btn sleep-toggle ${isSleeping ? 'is-sleeping' : ''}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                setIsSleeping((p) => !p)
-                setIsPaused(false)
-                setNotice(isSleeping ? 'Companion woke up.' : 'Companion is now sleeping.')
-              }}
-              title={isSleeping ? 'Wake companion' : 'Put companion to sleep'}
-              aria-label={isSleeping ? 'Wake companion' : 'Put companion to sleep'}
-            >
-              <span className="control-icon" aria-hidden="true">{isSleeping ? '☼' : '☾'}</span>
-              <span className="control-text">{isSleeping ? 'Wake' : 'Sleep'}</span>
-            </button>
-
-            <div className="avatar-state-select-wrapper" title="Avatar state preview">
-              <select
-                id="avatar-state-select"
-                aria-label="Avatar state preview selector"
-                value={avatarState}
-                onChange={(e) => {
-                  const s = avatarStates.find((st) => st === e.target.value)
-                  if (s) setAvatarState(s)
-                }}
-                disabled={isSleeping}
-              >
-                {avatarStates.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-          </div>
-
-          <div className="avatar-drag-hint" aria-hidden="true">
-            <span>⠿</span>
-            <span>Drag to move</span>
-          </div>
-        </section>
-      )}
             </div>
           </div>
         </section>
       )}
+
+      {/* Floating Doraemon Desktop Companion (Always visible and moves across the desktop) */}
+      <section
+        className={`compact-floating-avatar state-${currentAvatarState.toLowerCase().replaceAll(' ', '-')} ${isSleeping ? 'is-sleeping' : ''} ${isMoving ? 'is-moving' : ''}`}
+        style={companionStyle}
+        role="region"
+        aria-label="Floating Doraemon Companion"
+        tabIndex={0}
+        onPointerDown={beginCompanionDrag}
+        onPointerMove={moveCompanion}
+        onPointerUp={endCompanionDrag}
+        onPointerCancel={endCompanionDrag}
+        onKeyDown={nudgeCompanion}
+      >
+        <div className={`avatar-float-stage avatar-state-${animState}`}>
+          {isSleeping && (
+            <div className="avatar-zzz-cloud" aria-hidden="true">
+              <span className="z1">z</span>
+              <span className="z2">z</span>
+              <span className="z3">Z</span>
+            </div>
+          )}
+
+          <div className="avatar-image-wrapper">
+            <AvatarCharacter state={animState} size={150} facing={facing} />
+          </div>
+
+          <div className="avatar-ground-shadow" aria-hidden="true" />
+        </div>
+
+        <div className="avatar-controls-dock" role="toolbar" aria-label="Avatar quick controls">
+          <button
+            type="button"
+            className={`avatar-control-btn ${isWindowOpen ? 'active' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsWindowOpen((p) => !p)
+            }}
+            title={isWindowOpen ? 'Minimize window' : 'Restore window'}
+            aria-label={isWindowOpen ? 'Minimize window' : 'Restore window'}
+          >
+            <span className="control-icon" aria-hidden="true">✦</span>
+            <span className="control-text">{isWindowOpen ? 'Hide' : 'Open'}</span>
+          </button>
+
+          <button
+            type="button"
+            className={`avatar-control-btn sleep-toggle ${isSleeping ? 'is-sleeping' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              setIsSleeping((p) => !p)
+              setIsPaused(false)
+              setNotice(isSleeping ? 'Companion woke up.' : 'Companion is now sleeping.')
+            }}
+            title={isSleeping ? 'Wake companion' : 'Put companion to sleep'}
+            aria-label={isSleeping ? 'Wake companion' : 'Put companion to sleep'}
+          >
+            <span className="control-icon" aria-hidden="true">{isSleeping ? '☼' : '☾'}</span>
+            <span className="control-text">{isSleeping ? 'Wake' : 'Sleep'}</span>
+          </button>
+        </div>
+
+        <div className="avatar-drag-hint" aria-hidden="true">
+          <span>⠿</span>
+          <span>Drag to move</span>
+        </div>
+      </section>
 
       {isStartMenuOpen && (
         <>

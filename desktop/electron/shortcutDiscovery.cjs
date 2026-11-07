@@ -62,18 +62,28 @@ const APP_SHORTCUT_REGISTRY = {
  * @returns {string|null} Full path to shortcut if found
  */
 function findDesktopShortcut(possibleNames) {
+  const oneDriveDesktop = path.join(process.env.USERPROFILE || '', 'OneDrive', 'Desktop');
   const userDesktop = path.join(process.env.USERPROFILE || '', 'Desktop');
   const publicDesktop = path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Desktop');
 
-  const searchDirs = [userDesktop, publicDesktop];
+  const searchDirs = [oneDriveDesktop, userDesktop, publicDesktop];
 
   for (const dir of searchDirs) {
     if (!dir || !fs.existsSync(dir)) continue;
-    for (const name of possibleNames) {
-      const fullPath = path.join(dir, name);
-      if (fs.existsSync(fullPath)) {
-        return fullPath;
+    try {
+      const files = fs.readdirSync(dir);
+      for (const name of possibleNames) {
+        const cleanName = name.toLowerCase().replace(/\.lnk$/, '');
+        const found = files.find((f) => {
+          const lower = f.toLowerCase();
+          return lower === name.toLowerCase() || (lower.endsWith('.lnk') && lower.includes(cleanName));
+        });
+        if (found) {
+          return path.join(dir, found);
+        }
       }
+    } catch {
+      // ignore read error
     }
   }
 
