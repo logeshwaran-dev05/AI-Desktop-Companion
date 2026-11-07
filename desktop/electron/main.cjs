@@ -24,8 +24,7 @@ if (!gotTheLock) {
       dashboardWindow.show();
       dashboardWindow.focus();
     }
-    if (avatarWindow && !avatarWindow.isDestroyed()) {
-      avatarWindow.show();
+    if (avatarWindow && !avatarWindow.isDestroyed() && avatarWindow.isVisible()) {
     }
   });
 }
@@ -129,8 +128,8 @@ function createAvatarWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
 
-  const width = 230;
-  const height = 280;
+  const width = 240;
+  const height = 300;
   // Position in bottom-right corner of work area with safe padding
   const x = Math.max(0, Math.round(workArea.x + workArea.width - width - 24));
   const y = Math.max(0, Math.round(workArea.y + workArea.height - height - 24));
@@ -255,8 +254,8 @@ function createTray() {
         }
       } else {
         if (!avatarWindow || avatarWindow.isDestroyed()) {
-          createAvatarWindow();
-        } else {
+                createAvatarWindow();
+              } else {
           avatarWindow.show();
           avatarWindow.setAlwaysOnTop(true, 'screen-saver');
         }
@@ -428,6 +427,9 @@ ipcMain.handle('companion:open-dashboard', () => {
     dashboardWindow.show();
     dashboardWindow.focus();
   }
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.hide();
+  }
   return true;
 });
 
@@ -446,6 +448,9 @@ ipcMain.handle('companion:sleep-avatar', () => {
 });
 
 ipcMain.handle('companion:wake-avatar', () => {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.hide();
+  }
   if (!avatarWindow || avatarWindow.isDestroyed()) {
     createAvatarWindow();
   } else {
@@ -472,6 +477,22 @@ ipcMain.handle('companion:quit-app', () => {
   app.quit();
 });
 
+ipcMain.handle('companion:trigger-voice-typing', async () => {
+  const { exec } = require('child_process');
+  const psFile = path.join(__dirname, 'triggerVoiceTyping.ps1');
+  return new Promise((resolve) => {
+    exec(`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${psFile}"`, (err, stdout) => {
+      if (err) {
+        console.warn('[Electron] Trigger voice typing error:', err);
+        resolve(false);
+      } else {
+        console.log('[Electron] Triggered Windows Voice Typing (Win+H):', (stdout || '').trim());
+        resolve(true);
+      }
+    });
+  });
+});
+
 ipcMain.handle('companion:sync-state', (_event, data) => {
   // Broadcast state to all windows
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
@@ -484,16 +505,14 @@ ipcMain.handle('companion:sync-state', (_event, data) => {
 });
 
 app.whenReady().then(() => {
-  console.log('[Electron] Application ready. Initializing Dashboard, Floating Avatar, and System Tray...');
+  console.log('[Electron] Application ready. Initializing Dashboard and System Tray...');
   createDashboardWindow();
-  createAvatarWindow();
   createTray();
-  console.log('[Electron] Windows and tray created successfully.');
+  console.log('[Electron] Started with single Doraemon companion.');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createDashboardWindow();
-      createAvatarWindow();
     }
   });
 });

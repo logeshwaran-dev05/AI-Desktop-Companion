@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 
 export type AvatarAnimState =
   | 'idle'
+  | 'listening'
   | 'thinking'
   | 'waiting'
   | 'running'
@@ -25,7 +26,7 @@ interface AvatarCharacterProps {
  * ========================================
  * Renders the original Doraemon character with responsive state-driven
  * animations (floating Take-copter, sprint runs, celebration jumps,
- * thought bubbles, speed streaks, and sparkles).
+ * thought bubbles, speed streaks, listening soundwaves, and sparkles).
  */
 export default function AvatarCharacter({
   state,
@@ -36,6 +37,7 @@ export default function AvatarCharacter({
 }: AvatarCharacterProps) {
   const [imgSrc, setImgSrc] = useState('/companion.webp')
 
+  const isListening = state === 'listening'
   const isRunning = state === 'running'
   const isSuccess = state === 'success'
   const isThinking = state === 'thinking'
@@ -66,6 +68,34 @@ export default function AvatarCharacter({
       role="img"
     >
       {/* ── Dynamic State Badges / Visual Effects ────────────────────────── */}
+
+      {/* Listening state: Sound wave badge */}
+      {isListening && (
+        <div
+          className="doraemon-fx-listening"
+          style={{
+            position: 'absolute',
+            top: -14,
+            right: 4,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 3,
+            background: 'rgba(56, 189, 248, 0.22)',
+            border: '1px solid rgba(56, 189, 248, 0.65)',
+            borderRadius: 14,
+            padding: '2px 8px',
+            boxShadow: '0 0 14px rgba(56, 189, 248, 0.45)',
+            pointerEvents: 'none',
+            zIndex: 10,
+          }}
+          aria-hidden="true"
+        >
+          <span style={{ fontSize: 13, marginRight: 2 }}>🎙️</span>
+          <span className="listening-bar bar-1" />
+          <span className="listening-bar bar-2" />
+          <span className="listening-bar bar-3" />
+        </div>
+      )}
 
       {/* Thinking state: Thought bubbles */}
       {isThinking && (
@@ -202,6 +232,8 @@ export default function AvatarCharacter({
             ? 'drop-shadow(0 0 18px rgba(52, 211, 153, 0.6)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
             : isRunning
             ? 'drop-shadow(0 0 18px rgba(56, 189, 248, 0.6)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
+            : isListening
+            ? 'drop-shadow(0 0 20px rgba(56, 189, 248, 0.75)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
             : isThinking
             ? 'drop-shadow(0 0 16px rgba(168, 85, 247, 0.5)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
             : 'drop-shadow(0 14px 22px rgba(0, 0, 0, 0.4)) drop-shadow(0 0 20px rgba(56, 189, 248, 0.25))',

@@ -1,14 +1,18 @@
 /**
  * App Launch & Desktop Task State Machine
  * ========================================
- * Implements the official task states required for real Windows companion operations:
- *   idle              → Doraemon stands at home position.
- *   planning          → Resolving intent and locating shortcut / desktop coordinates.
- *   awaiting_approval → Waiting for user approval (when configured).
- *   launching         → Doraemon visibly travels across the desktop toward target.
- *   success           → Verified process launch; celebration at destination.
- *   failed            → Error handled; Doraemon stops and displays real explanation.
- *   cancelled         → User cancelled; safe stop and return home.
+ * Implements the official task states and multi-stage lifecycle required for real
+ * Windows companion operations:
+ *
+ * Task Lifecycle Stages:
+ *   1. request_received  (15%) → Request acknowledged and queued.
+ *   2. understanding     (35%) → AI parsing intent and locating shortcut coordinates.
+ *   3. validating        (55%) → Verifying against allowlist registry and permissions.
+ *   4. waiting_execution (70%) → Preparing desktop companion window and movement path.
+ *   5. launch_attempted  (85%) → ShellExecute invoked; waiting for process detection.
+ *   6. launch_verified   (100%)→ Process confirmed running in Windows tasklist.
+ *   -  failed                  → Honest error explanation; Doraemon displays error badge.
+ *   -  cancelled               → User or system stopped action; safely returned home.
  */
 
 export type TaskState =
@@ -29,6 +33,37 @@ export type LaunchState =
   | 'error'
 
 export type ExecutionMode = 'real' | 'mock'
+
+export type TaskStageId =
+  | 'request_received'
+  | 'understanding'
+  | 'validating'
+  | 'waiting_execution'
+  | 'launch_attempted'
+  | 'launch_verified'
+  | 'failed'
+  | 'cancelled'
+
+export interface TaskStage {
+  id: TaskStageId
+  label: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
+  timestamp?: string
+  detail?: string
+}
+
+export interface LiveTaskProgress {
+  taskId: string
+  rawCommand: string
+  currentStageId: TaskStageId
+  percent: number
+  stages: TaskStage[]
+  displayName?: string
+  appId?: string
+  isVerified?: boolean
+  error?: string
+  executionMode: ExecutionMode
+}
 
 export interface TargetInfo {
   foundShortcut: boolean
@@ -56,8 +91,7 @@ export interface LaunchResult {
    */
   realLaunch: boolean
   /**
-   * true only if the IPC call confirms the process started.
-   * Always false — we cannot verify GUI window visibility from the main process.
+   * true only if the IPC call confirms the process started in tasklist.
    */
   verified?: boolean
   /** Error description, present on error / not-allowed / not-in-electron states */
@@ -106,6 +140,63 @@ const PHRASE_MAP: Array<{ patterns: RegExp[]; appId: string; displayName: string
 ]
 
 /**
+ * Creates the initial multi-stage task progress model.
+ */
+export function createInitialTaskProgress(
+  taskId: string,
+  rawCommand: string,
+  mode: ExecutionMode
+): LiveTaskProgress {
+  const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return {
+    taskId,
+    rawCommand,
+    currentStageId: 'request_received',
+    percent: 15,
+    executionMode: mode,
+    stages: [
+      {
+        id: 'request_received',
+        label: 'Request received',
+        status: 'completed',
+        timestamp: timeNow,
+        detail: `Received command: "${rawCommand}"`,
+      },
+      {
+        id: 'understanding',
+        label: 'Understanding request',
+        status: 'in_progress',
+        detail: 'Analyzing natural language intent…',
+      },
+      {
+        id: 'validating',
+        label: 'Validating application',
+        status: 'pending',
+        detail: 'Checking allowlist and discovering shortcut path…',
+      },
+      {
+        id: 'waiting_execution',
+        label: 'Waiting for execution',
+        status: 'pending',
+        detail: 'Synchronizing desktop companion window…',
+      },
+      {
+        id: 'launch_attempted',
+        label: 'Launch attempted',
+        status: 'pending',
+        detail: 'Invoking Windows process launcher…',
+      },
+      {
+        id: 'launch_verified',
+        label: 'Launch verified',
+        status: 'pending',
+        detail: 'Awaiting process verification in tasklist…',
+      },
+    ],
+  }
+}
+
+/**
  * Resolve a natural-language command string to a known app identifier.
  * Returns null if no known app is found in the text.
  */
@@ -122,5 +213,6 @@ export function resolveAppIntent(text: string): { appId: string; displayName: st
 
 /** Check whether the text looks like a "launch / open application" intent */
 export function isLaunchIntent(text: string): boolean {
-  return /\b(open|launch|start|run|show)\b/i.test(text)
+  if (/\b(open|launch|start|run|show|access)\b/i.test(text)) return true
+  return resolveAppIntent(text) !== null
 }

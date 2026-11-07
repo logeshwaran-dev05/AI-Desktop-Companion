@@ -102,8 +102,8 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
     // Derive facing direction from horizontal travel
     const facing = deltaX < 0 ? 'left' : 'right';
 
-    // Calculate duration based on distance (minimum 1200ms, maximum 2800ms)
-    const duration = options.durationMs || Math.min(2800, Math.max(1200, Math.round(distance * 2.2)));
+    // Calculate duration based on distance (minimum 2400ms, maximum 3800ms for smooth pacing)
+    const duration = options.durationMs || Math.min(3800, Math.max(2400, Math.round(distance * 3.2)));
     const frameRateMs = 16; // ~60fps
     const totalSteps = Math.max(1, Math.round(duration / frameRateMs));
 
@@ -181,7 +181,7 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
 async function returnHome(avatarWindow) {
   if (!avatarWindow || avatarWindow.isDestroyed()) return false;
   const home = getHomePosition(avatarWindow);
-  const result = await moveAvatarTo(avatarWindow, home.x, home.y, { durationMs: 1600 });
+  const result = await moveAvatarTo(avatarWindow, home.x, home.y, { durationMs: 2600 });
   return result.completed;
 }
 
