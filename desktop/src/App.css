@@ -274,7 +274,16 @@ kbd { margin-left: 3px; padding: 1px 4px; border: 1px solid #2b4050; border-radi
 .timeline-task strong { color: #bdcbd5; font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
 .timeline-detail { color: #73899a; font-size: 8px; }
 .task-status { display: inline-flex; width: fit-content; align-items: center; padding: 2px 6px; border: 1px solid #29414f; border-radius: 5px; color: #8ddfe6; background: rgba(72, 217, 235, .07); font-size: 8px; font-weight: 600; }
-.status-completed { color: #5ce6b0; border-color: #215c48; background: rgba(74, 222, 128, .12); }
+.mic-button.active-listening {
+  border-color: #f43f5e !important;
+  background: rgba(244, 63, 94, 0.22) !important;
+  animation: pulse-mic 1.2s infinite;
+}
+@keyframes pulse-mic {
+  0% { transform: scale(1); box-shadow: 0 0 0 rgba(244, 63, 94, 0.4); }
+  50% { transform: scale(1.12); box-shadow: 0 0 12px rgba(244, 63, 94, 0.7); }
+  100% { transform: scale(1); box-shadow: 0 0 0 rgba(244, 63, 94, 0.4); }
+}
 .status-running { color: #f7c968; border-color: #5c4d21; background: rgba(247, 201, 104, .12); }
 .status-failed { color: #ff7683; border-color: #5c2128; background: rgba(255, 118, 131, .12); }
 .status-stopped { color: #e0929a; border-color: #49323e; background: rgba(194, 92, 111, .09); }

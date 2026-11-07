@@ -28,6 +28,7 @@ LaunchMethod = Literal[
     "start_menu_shortcut",
     "app_paths_registry",
     "appx_packaged",
+    "shell_apps_folder",
     "custom_launch",
 ]
 ErrorCode = Literal[

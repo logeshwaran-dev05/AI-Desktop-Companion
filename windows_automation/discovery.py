@@ -197,6 +197,12 @@ class ApplicationDiscoverer:
             except Exception as exc:
                 errors.append(f"appx_packages: {str(exc)}")
 
+            sources_scanned.append("start_apps")
+            try:
+                self._discover_from_start_apps(discovered_map)
+            except Exception as exc:
+                errors.append(f"start_apps: {str(exc)}")
+
         # 6. Custom search directories
         for custom_dir in self.custom_search_dirs:
             sources_scanned.append(f"custom:{custom_dir}")
@@ -487,3 +493,96 @@ class ApplicationDiscoverer:
                         metadata={"is_windows_app_alias": True},
                     )
                     result_map[key] = rec
+
+    def _discover_from_start_apps(self, result_map: Dict[str, ApplicationRecord]):
+        """
+        Discover modern Store/UWP apps and Start Menu apps via Windows Get-StartApps.
+        Uses a local JSON cache for sub-millisecond startup, refreshing when cache is older than 24 hours.
+        """
+        import json
+        import tempfile
+        import subprocess
+
+        cache_path = os.path.join(tempfile.gettempdir(), "ai_companion_start_apps_cache.json")
+        items = []
+
+        # Check cache
+        if os.path.exists(cache_path):
+            try:
+                mtime = os.path.getmtime(cache_path)
+                if time.time() - mtime < 86400:  # 24 hours
+                    with open(cache_path, "r", encoding="utf-8") as f:
+                        items = json.load(f)
+            except Exception:
+                items = []
+
+        if not items:
+            try:
+                res = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Get-StartApps | ConvertTo-Json -Compress"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    raw = json.loads(res.stdout)
+                    items = raw if isinstance(raw, list) else [raw]
+                    try:
+                        with open(cache_path, "w", encoding="utf-8") as f:
+                            json.dump(items, f)
+                    except Exception:
+                        pass
+            except Exception:
+                items = []
+
+        COMMON_SMART_ALIASES = {
+            "whatsapp": ["whatsapp", "whats app", "wa"],
+            "calculator": ["calc", "calculator"],
+            "google chrome": ["chrome", "google chrome", "browser", "my browser"],
+            "visual studio code": ["vs code", "vscode", "code"],
+            "adobe photoshop 2025": ["photoshop", "adobe photoshop", "ps"],
+            "spotify": ["spotify", "music", "spotify music"],
+            "settings": ["settings", "windows settings", "pc settings"],
+            "word": ["word", "ms word", "microsoft word"],
+            "excel": ["excel", "ms excel", "microsoft excel"],
+            "powerpoint": ["powerpoint", "ppt", "ms powerpoint"],
+        }
+
+        for item in items:
+            name = item.get("Name")
+            aid = item.get("AppID")
+            if not name or not aid:
+                continue
+
+            app_id = generate_stable_app_id(name)
+            norm_name = normalize_app_name(name)
+            key = f"startapp:{name.lower()}"
+
+            # Generate smart aliases
+            aliases = [norm_name]
+            lower_name = name.lower()
+
+            for target_k, smart_list in COMMON_SMART_ALIASES.items():
+                if target_k == lower_name or (len(target_k) > 4 and target_k in lower_name):
+                    aliases.extend(smart_list)
+
+            # Clean duplicate aliases
+            aliases = list(dict.fromkeys(aliases))
+
+            is_packaged = "!" in aid or aid.startswith("Microsoft.") or aid.startswith("5319275A.") or "App" in aid
+            launch_method = "appx_packaged" if is_packaged else "shell_apps_folder"
+
+            rec = ApplicationRecord(
+                app_id=app_id,
+                display_name=name,
+                normalized_name=norm_name,
+                executable_path=aid,
+                source="start_apps",
+                app_type="packaged_app" if is_packaged else "desktop_app",
+                status="available",
+                launch_method=launch_method,
+                app_user_model_id=aid,
+                aliases=aliases,
+                metadata={"start_apps_id": aid},
+            )
+            result_map[key] = rec

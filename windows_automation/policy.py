@@ -133,6 +133,15 @@ class WindowsActionPolicy:
                     return False, "ERR_TARGET_UNAVAILABLE", f"Shortcut file missing: '{record.shortcut_path}'"
                 return True, None, None
 
+            if record.launch_method in ["appx_packaged", "shell_apps_folder"] or record.app_type == "packaged_app":
+                target_id = record.app_user_model_id or record.executable_path
+                if not target_id:
+                    return False, "ERR_TARGET_UNAVAILABLE", f"Packaged application '{record.display_name}' has no AppID or AUMID."
+                # Verify safe characters in AppID (alphanumerics, dots, underscores, dashes, exclamation, curly braces, colons, slashes)
+                if any(c in target_id for c in self.FORBIDDEN_SUBSTRINGS):
+                    return False, "ERR_TARGET_NOT_ALLOWLISTED", f"Packaged app target '{target_id}' contains unsafe characters."
+                return True, None, None
+
             if not record.executable_path:
                 return False, "ERR_TARGET_UNAVAILABLE", f"Application '{record.display_name}' has no executable path."
             record_ext = os.path.splitext(record.executable_path)[1].lower()

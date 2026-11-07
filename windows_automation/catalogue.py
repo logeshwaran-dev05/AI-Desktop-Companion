@@ -88,15 +88,27 @@ class ApplicationCatalogue:
         # 3. Exact alias match
         if norm_query in self._records_by_alias:
             matched_list = self._records_by_alias[norm_query]
-            if len(matched_list) == 1:
-                return self._validate_and_return_match(norm_query, matched_list[0], verify_existence=verify_existence)
-            elif len(matched_list) > 1:
+            # Deduplicate by normalized name
+            unique_matches = list({m.normalized_name: m for m in matched_list}.values())
+            if len(unique_matches) == 1:
+                return self._validate_and_return_match(norm_query, unique_matches[0], verify_existence=verify_existence)
+            elif len(unique_matches) > 1:
+                # Prefer exact normalized name match if present
+                exact_name_match = [m for m in unique_matches if m.normalized_name == norm_query]
+                if len(exact_name_match) == 1:
+                    return self._validate_and_return_match(norm_query, exact_name_match[0], verify_existence=verify_existence)
+
+                # Prefer candidate that starts with the query word (e.g. 'Calculator' for 'calc')
+                starts_with_query = [m for m in unique_matches if m.normalized_name.startswith(norm_query) or m.display_name.lower().startswith(clean_query.lower())]
+                if len(starts_with_query) == 1:
+                    return self._validate_and_return_match(norm_query, starts_with_query[0], verify_existence=verify_existence)
+
                 return ResolutionResult(
                     status="ambiguous",
                     query=clean_query,
                     matched_record=None,
-                    candidates=matched_list,
-                    reason=f"Query '{clean_query}' matches multiple applications: {[m.display_name for m in matched_list]}",
+                    candidates=unique_matches,
+                    reason=f"Query '{clean_query}' matches multiple applications: {[m.display_name for m in unique_matches]}",
                 )
 
         # 4. Prefix or substring matching across names and aliases
@@ -111,9 +123,17 @@ class ApplicationCatalogue:
                             candidates.append(rec)
                         break
 
+        # Deduplicate candidates by normalized name
+        candidates = list({c.normalized_name: c for c in candidates}.values())
+
         if len(candidates) == 1:
             return self._validate_and_return_match(norm_query, candidates[0], verify_existence=verify_existence)
         elif len(candidates) > 1:
+            # Check if one candidate has an exact alias match
+            exact_alias_match = [c for c in candidates if norm_query in [a.lower() for a in c.aliases]]
+            if len(exact_alias_match) == 1:
+                return self._validate_and_return_match(norm_query, exact_alias_match[0], verify_existence=verify_existence)
+
             # Check if one candidate is an exact word prefix
             exact_prefixes = [c for c in candidates if c.normalized_name.startswith(norm_query)]
             if len(exact_prefixes) == 1:
@@ -129,7 +149,7 @@ class ApplicationCatalogue:
                 query=clean_query,
                 matched_record=None,
                 candidates=candidates,
-                reason=f"Ambiguous query '{clean_query}' matched {len(candidates)} candidates.",
+                reason=f"Ambiguous query '{clean_query}' matched {len(candidates)} candidates: {[c.display_name for c in candidates]}",
             )
 
         # 5. Not found
@@ -159,6 +179,17 @@ class ApplicationCatalogue:
                     candidates=[rec],
                     reason=f"Shortcut target does not exist at '{rec.shortcut_path}'.",
                 )
+            rec.status = "available"
+            return ResolutionResult(
+                status="resolved",
+                query=query,
+                matched_record=rec,
+                candidates=[rec],
+                reason=None,
+            )
+
+        # For packaged apps or shell apps folder, target is an AUMID or registered shell ID
+        if rec.launch_method in ["appx_packaged", "shell_apps_folder"] or rec.app_type == "packaged_app":
             rec.status = "available"
             return ResolutionResult(
                 status="resolved",

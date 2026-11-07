@@ -64,8 +64,10 @@ function App() {
   const [avatarImageSrc, setAvatarImageSrc] = useState('/companion.webp')
   const [notice, setNotice] = useState('')
   const [floatingPosition, setFloatingPosition] = useState<{ x: number; y: number } | null>(null)
+  const [isListening, setIsListening] = useState(false)
   const dragOrigin = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
   const avatarDragStart = useRef<{ x: number; y: number } | null>(null)
+  const recognitionRef = useRef<any>(null)
 
   useEffect(() => {
     if (viewMode === 'avatar') {
@@ -101,8 +103,71 @@ function App() {
         top: 'auto',
       }
 
-  async function sendMessage() {
-    const text = message.trim()
+  function toggleVoiceInput() {
+    if (isSleeping) return
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setNotice('Voice recognition is not supported in this browser. Please use Chrome or Edge.')
+      return
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+      setIsListening(false)
+      setAvatarState('Idle')
+      setNotice('Voice listening stopped.')
+      return
+    }
+
+    try {
+      const recognition = new SpeechRecognition()
+      recognition.continuous = false
+      recognition.interimResults = true
+      recognition.lang = 'en-US'
+      recognitionRef.current = recognition
+
+      recognition.onstart = () => {
+        setIsListening(true)
+        setAvatarState('Listening')
+        setNotice('Listening... speak now (e.g. "Open WhatsApp", "Launch Calculator", "Open Chrome")')
+      }
+
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((result: any) => result[0].transcript)
+          .join('')
+        setMessage(transcript)
+        if (event.results[0].isFinal) {
+          setIsListening(false)
+          sendMessage(transcript)
+        }
+      }
+
+      recognition.onerror = (event: any) => {
+        setIsListening(false)
+        setAvatarState('Idle')
+        if (event.error === 'not-allowed') {
+          setNotice('Microphone access denied. Please allow microphone permissions in Chrome.')
+        } else {
+          setNotice(`Voice recognition error: ${event.error}`)
+        }
+      }
+
+      recognition.onend = () => {
+        setIsListening(false)
+      }
+
+      recognition.start()
+    } catch (err: any) {
+      setIsListening(false)
+      setNotice(`Could not start microphone: ${err?.message || err}`)
+    }
+  }
+
+  async function sendMessage(explicitText?: string) {
+    const text = (explicitText ?? message).trim()
     if (!text || isSleeping) return
 
     const now = new Date()
@@ -151,6 +216,17 @@ function App() {
 
       setAvatarState(newAvatarState)
       setNotice(data.status === 'success' ? `Task completed: ${replyText}` : replyText)
+
+      // Spoken Feedback using Web Speech Synthesis
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try {
+          const utterance = new SpeechSynthesisUtterance(replyText)
+          utterance.rate = 1.0
+          window.speechSynthesis.speak(utterance)
+        } catch {
+          // ignore tts error
+        }
+      }
 
       if (newAvatarState === 'Success') {
         setTimeout(() => setAvatarState('Idle'), 4000)
@@ -591,13 +667,13 @@ function App() {
                     <div className="composer-footer">
                       <div className="composer-tools">
                         <button
-                          className="icon-button mic-button"
+                          className={`icon-button mic-button ${isListening ? 'active-listening' : ''}`}
                           type="button"
-                          aria-label="Microphone unavailable in preview"
-                          title="Voice input is not connected"
-                          onClick={() => setNotice('Voice input is not connected in this UI preview.')}
+                          aria-label={isListening ? 'Stop listening' : 'Start voice input'}
+                          title={isListening ? 'Listening (click to stop)' : 'Click to speak your command'}
+                          onClick={toggleVoiceInput}
                         >
-                          <span aria-hidden="true">◉</span>
+                          <span aria-hidden="true" style={{ color: isListening ? '#f43f5e' : undefined }}>◉</span>
                         </button>
                         <span className="input-hint">Enter to send <kbd>↵</kbd></span>
                       </div>

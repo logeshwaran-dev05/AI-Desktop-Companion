@@ -226,6 +226,19 @@ class WindowsAutomationExecutor:
             if method == "start_menu_shortcut" and self._shortcut_launcher:
                 # Launch via Windows shell link handler safely
                 self._shortcut_launcher(resolved_path)
+            elif method in ["appx_packaged", "shell_apps_folder"]:
+                aumid = (request.resolved_record.app_user_model_id if request.resolved_record else None) or resolved_path
+                target_shell = aumid if str(aumid).startswith("shell:AppsFolder\\") else f"shell:AppsFolder\\{aumid}"
+                if self._shortcut_launcher:
+                    self._shortcut_launcher(target_shell)
+                else:
+                    self._subprocess_runner(
+                        ["explorer.exe", target_shell],
+                        shell=False,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
             else:
                 # Standard subprocess launch (shell=False strictly)
                 launch_args = [resolved_path]
@@ -292,6 +305,8 @@ class WindowsAutomationExecutor:
 
         verify_timeout = min(request.timeout_seconds, 10.0)
         app_name = os.path.basename(resolved_path) if resolved_path else request.target
+        if request.resolved_record and request.resolved_record.display_name:
+            app_name = request.resolved_record.display_name
 
         evidence = self.verifier.verify_window_readiness(
             pid=spawned_pid or 0,
