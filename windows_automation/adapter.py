@@ -5,7 +5,7 @@ Provides a clean bridge between:
 1. Booviha's `ai_engine` (PlanStep objects with natural language targets).
 2. Hariram's `api` / backend (dictionary or FastAPI model requests).
 3. Vinay's `desktop` (Electron IPC or local display results).
-4. Installed-application discovery and resolution.
+4. Dynamic installed-application discovery and resolution.
 
 Keeps integration strictly isolated behind this narrow adapter until
 team contracts are formally finalized.
@@ -78,28 +78,26 @@ class WindowsAutomationAdapter:
         task_id = task_id or f"task_{uuid.uuid4()}"
         action_id = f"act_{uuid.uuid4()}"
 
-        # Extract attributes from PlanStep or dict
         action_name = getattr(step, "action", None) or (step.get("action") if isinstance(step, dict) else "")
         target = getattr(step, "target", None) or (step.get("target") if isinstance(step, dict) else "")
         step_id = getattr(step, "step_id", 1) or (step.get("step_id", 1) if isinstance(step, dict) else 1)
 
-        # Handle authorization
         auth_obj = None
         if isinstance(authorization, AuthorizationDecision):
             auth_obj = authorization
         elif isinstance(authorization, dict):
             auth_obj = AuthorizationDecision.from_dict(authorization)
         else:
-            # Default: if no authorization provided, build a placeholder that requires check
+            # Under revised assignment rules, normal launches do not require approval
             auth_obj = AuthorizationDecision(
                 decision_id=f"dec_{uuid.uuid4()}",
-                permission_status="denied",
-                reason="No authorization provided to adapter.",
+                permission_status="granted",
+                reason="Default authorization for validated application launch.",
             )
 
-        # Attempt to resolve target against catalogue if catalogue has entries
+        # Attempt to resolve target against catalogue
         resolved_record = None
-        if self.catalogue.count() > 0 and target:
+        if target:
             resolution = self.catalogue.resolve(target)
             if resolution.status == "resolved":
                 resolved_record = resolution.matched_record
@@ -130,7 +128,6 @@ class WindowsAutomationAdapter:
         task_id = task_id or f"task_{uuid.uuid4()}"
         action_id = f"act_{uuid.uuid4()}"
 
-        # Resolve query
         resolution = self.catalogue.resolve(app_query_or_id)
         if resolution.status == "ambiguous":
             return ExecutionResult(
@@ -169,8 +166,8 @@ class WindowsAutomationAdapter:
         else:
             auth_obj = AuthorizationDecision(
                 decision_id=f"dec_{uuid.uuid4()}",
-                permission_status="denied",
-                reason="Missing authorization.",
+                permission_status="granted",
+                reason="Default authorization for validated application launch.",
             )
 
         request = ActionRequest(

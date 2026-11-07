@@ -2,7 +2,8 @@
 Data structures and schemas for Windows Automation module.
 
 Defines ApplicationRecord, DiscoveryResult, ResolutionResult, ActionRequest,
-AuthorizationDecision, VerificationEvidence, AuditRecord, and ExecutionResult.
+AuthorizationDecision, VerificationEvidence, AuditRecord, ExecutionResult,
+and DiagnosticRecord.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -13,6 +14,7 @@ from typing import Optional, Literal, Any, Dict, List
 PermissionStatus = Literal["granted", "denied", "requires_approval"]
 ActionStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 VerificationStatus = Literal[
+    "launch_attempted",
     "launch_accepted",
     "launch_verified",
     "launch_failed",
@@ -20,6 +22,13 @@ VerificationStatus = Literal[
     "denied",
     "timed_out",
     "verification_inconclusive",
+]
+LaunchMethod = Literal[
+    "subprocess_executable",
+    "start_menu_shortcut",
+    "app_paths_registry",
+    "appx_packaged",
+    "custom_launch",
 ]
 ErrorCode = Literal[
     "ERR_INVALID_REQUEST",
@@ -48,13 +57,19 @@ def current_iso_timestamp() -> str:
 class ApplicationRecord:
     """
     Structured record representing a discovered or registered Windows application.
+    Supports standard Win32 executables, Start Menu shortcuts, App Paths, and AppX/MSIX.
     """
     app_id: str
     display_name: str
     normalized_name: str
     executable_path: str
-    source: str  # "system_builtin", "start_menu_user", "start_menu_all_users", "registry", "app_path"
+    source: str  # "system_builtin", "start_menu_user", "start_menu_all_users", "registry", "app_paths", "appx_package"
+    app_type: str = "executable"  # "executable", "shortcut", "app_path", "packaged_app"
     status: str = "available"  # "available", "target_missing", "unsupported"
+    launch_method: LaunchMethod = "subprocess_executable"
+    shortcut_path: Optional[str] = None
+    package_family_name: Optional[str] = None
+    app_user_model_id: Optional[str] = None
     version: Optional[str] = None
     publisher: Optional[str] = None
     icon_path: Optional[str] = None
@@ -73,7 +88,12 @@ class ApplicationRecord:
             normalized_name=data.get("normalized_name", ""),
             executable_path=data.get("executable_path", ""),
             source=data.get("source", "unknown"),
+            app_type=data.get("app_type", "executable"),
             status=data.get("status", "available"),
+            launch_method=data.get("launch_method", "subprocess_executable"),
+            shortcut_path=data.get("shortcut_path"),
+            package_family_name=data.get("package_family_name"),
+            app_user_model_id=data.get("app_user_model_id"),
             version=data.get("version"),
             publisher=data.get("publisher"),
             icon_path=data.get("icon_path"),
@@ -122,10 +142,26 @@ class ResolutionResult:
 
 
 @dataclass
+class DiagnosticRecord:
+    """Structured diagnostic information for execution analysis and failure tracking."""
+    requested_target: str
+    resolved_app_id: Optional[str] = None
+    discovery_source: Optional[str] = None
+    launch_method: Optional[str] = None
+    target_validation_passed: bool = False
+    failing_stage: Optional[str] = None  # "validation", "authorization", "launch_spawn", "verification"
+    exception_details: Optional[str] = None
+    verification_summary: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
 class AuthorizationDecision:
     """Security and authorization decision associated with an action."""
     decision_id: str
-    permission_status: PermissionStatus = "denied"
+    permission_status: PermissionStatus = "granted"
     requires_user_approval: bool = False
     approval_reference: Optional[str] = None
     evaluated_at: str = field(default_factory=current_iso_timestamp)
@@ -145,7 +181,7 @@ class AuthorizationDecision:
     def from_dict(cls, data: Dict[str, Any]) -> "AuthorizationDecision":
         return cls(
             decision_id=data.get("decision_id", ""),
-            permission_status=data.get("permission_status", "denied"),
+            permission_status=data.get("permission_status", "granted"),
             requires_user_approval=bool(data.get("requires_user_approval", False)),
             approval_reference=data.get("approval_reference"),
             evaluated_at=data.get("evaluated_at", current_iso_timestamp()),
@@ -206,7 +242,7 @@ class ActionRequest:
 class VerificationEvidence:
     """Truthful verification results and evidence."""
     verified: bool = False
-    verification_status: VerificationStatus = "launch_accepted"
+    verification_status: VerificationStatus = "launch_attempted"
     method: str = "none"
     details: Dict[str, Any] = field(default_factory=dict)
     evidence_timestamp: str = field(default_factory=current_iso_timestamp)
@@ -235,7 +271,7 @@ class ExecutionResult:
     action_id: str
     task_id: str
     status: ActionStatus
-    verification_status: VerificationStatus = "launch_accepted"
+    verification_status: VerificationStatus = "launch_attempted"
     error_code: Optional[str] = None
     error_message: Optional[str] = None
     started_at: str = field(default_factory=current_iso_timestamp)
@@ -243,6 +279,7 @@ class ExecutionResult:
     duration_ms: int = 0
     verification: VerificationEvidence = field(default_factory=VerificationEvidence)
     resolved_record: Optional[ApplicationRecord] = None
+    diagnostics: Optional[DiagnosticRecord] = None
     audit: Optional[AuditRecord] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -251,6 +288,8 @@ class ExecutionResult:
             res["verification"] = self.verification.to_dict()
         if self.resolved_record:
             res["resolved_record"] = self.resolved_record.to_dict()
+        if self.diagnostics:
+            res["diagnostics"] = self.diagnostics.to_dict()
         if self.audit:
             res["audit"] = self.audit.to_dict()
         return res

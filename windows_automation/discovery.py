@@ -1,8 +1,8 @@
 """
 Installed-Application Discovery Module for Windows Automation.
 
-Discovers registered applications, Start Menu shortcuts, and system utilities
-using trusted, read-only Windows sources without executing any binaries.
+Discovers registered applications, Start Menu shortcuts, App Paths, and AppX/MSIX
+packages using trusted, reviewable Windows sources without executing binaries.
 """
 
 import os
@@ -14,12 +14,12 @@ from windows_automation.schemas import ApplicationRecord, DiscoveryResult, curre
 
 
 def normalize_app_name(name: str) -> str:
-    """Normalize application name for safe comparison and indexing."""
+    """Normalize application name for safe comparison, indexing, and alias matching."""
     if not name:
         return ""
     # Lowercase and replace non-alphanumeric characters with spaces
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", name.lower())
-    # Collapse multiple spaces
+    # Collapse multiple spaces and trim
     return " ".join(cleaned.split())
 
 
@@ -34,7 +34,7 @@ def parse_lnk_file(filepath: str) -> Optional[str]:
     """
     Safely extract target executable path from a Windows .lnk Shell Link file
     using pure Python binary parsing of the MS-SHLLINK specification.
-    Returns the resolved target path if valid and exists, else None.
+    Returns the resolved target path if valid, else None.
     """
     try:
         with open(filepath, "rb") as f:
@@ -69,7 +69,7 @@ def parse_lnk_file(filepath: str) -> Optional[str]:
                 if base_path_offset and (link_info_start + base_path_offset < len(data)):
                     target_bytes = data[link_info_start + base_path_offset : link_info_start + link_info_size]
                     target_str = target_bytes.split(b"\x00")[0].decode("ansi", errors="ignore")
-                    if target_str and os.path.exists(target_str):
+                    if target_str:
                         return target_str
     except Exception:
         return None
@@ -82,24 +82,28 @@ class ApplicationDiscoverer:
     Never executes binaries during discovery.
     """
 
-    # Safe built-in Windows utilities available on all standard installations
+    # Safe built-in Windows utilities available on standard installations
     BUILTIN_UTILITIES = [
         {
             "display_name": "Notepad",
             "executable_name": "notepad.exe",
-            "aliases": ["notepad", "text editor", "note"],
+            "aliases": ["notepad", "text editor", "note", "editor"],
             "known_paths": [
                 r"C:\Windows\System32\notepad.exe",
                 r"C:\Windows\notepad.exe",
             ],
+            "app_type": "executable",
+            "launch_method": "subprocess_executable",
         },
         {
             "display_name": "Calculator",
             "executable_name": "calc.exe",
-            "aliases": ["calc", "calculator"],
+            "aliases": ["calc", "calculator", "math"],
             "known_paths": [
                 r"C:\Windows\System32\calc.exe",
             ],
+            "app_type": "packaged_app",
+            "launch_method": "subprocess_executable",
         },
         {
             "display_name": "Paint",
@@ -108,6 +112,18 @@ class ApplicationDiscoverer:
             "known_paths": [
                 r"C:\Windows\System32\mspaint.exe",
             ],
+            "app_type": "executable",
+            "launch_method": "subprocess_executable",
+        },
+        {
+            "display_name": "Task Manager",
+            "executable_name": "taskmgr.exe",
+            "aliases": ["task manager", "taskmgr", "task"],
+            "known_paths": [
+                r"C:\Windows\System32\taskmgr.exe",
+            ],
+            "app_type": "executable",
+            "launch_method": "subprocess_executable",
         },
     ]
 
@@ -116,11 +132,15 @@ class ApplicationDiscoverer:
         include_builtins: bool = True,
         include_start_menu: bool = True,
         include_registry: bool = True,
+        include_app_paths: bool = True,
+        include_packaged_apps: bool = True,
         custom_search_dirs: Optional[List[str]] = None,
     ):
         self.include_builtins = include_builtins
         self.include_start_menu = include_start_menu
         self.include_registry = include_registry
+        self.include_app_paths = include_app_paths
+        self.include_packaged_apps = include_packaged_apps
         self.custom_search_dirs = custom_search_dirs or []
 
     def discover_all(self) -> DiscoveryResult:
@@ -130,7 +150,7 @@ class ApplicationDiscoverer:
         """
         sources_scanned: List[str] = []
         errors: List[str] = []
-        discovered_map: Dict[str, ApplicationRecord] = {}  # target_path_lower -> ApplicationRecord
+        discovered_map: Dict[str, ApplicationRecord] = {}  # unique_key -> ApplicationRecord
 
         # 1. Discover System Built-ins
         if self.include_builtins:
@@ -140,7 +160,7 @@ class ApplicationDiscoverer:
             except Exception as exc:
                 errors.append(f"system_builtin: {str(exc)}")
 
-        # 2. Discover Start Menu Shortcuts
+        # 2. Discover from Start Menu Shortcuts
         if self.include_start_menu:
             start_menu_dirs = [
                 (os.path.expandvars(r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs"), "start_menu_all_users"),
@@ -153,7 +173,15 @@ class ApplicationDiscoverer:
                 except Exception as exc:
                     errors.append(f"{src_name}: {str(exc)}")
 
-        # 3. Discover from Windows Registry
+        # 3. Discover from Windows App Paths Registry
+        if self.include_app_paths and sys.platform == "win32":
+            sources_scanned.append("app_paths")
+            try:
+                self._discover_from_app_paths(discovered_map)
+            except Exception as exc:
+                errors.append(f"app_paths: {str(exc)}")
+
+        # 4. Discover from Windows Uninstall Registry Keys
         if self.include_registry and sys.platform == "win32":
             sources_scanned.append("windows_registry")
             try:
@@ -161,7 +189,15 @@ class ApplicationDiscoverer:
             except Exception as exc:
                 errors.append(f"windows_registry: {str(exc)}")
 
-        # 4. Custom search directories (if any provided)
+        # 5. Discover from Packaged / AppX Applications
+        if self.include_packaged_apps and sys.platform == "win32":
+            sources_scanned.append("appx_packages")
+            try:
+                self._discover_from_packaged_apps(discovered_map)
+            except Exception as exc:
+                errors.append(f"appx_packages: {str(exc)}")
+
+        # 6. Custom search directories
         for custom_dir in self.custom_search_dirs:
             sources_scanned.append(f"custom:{custom_dir}")
             try:
@@ -169,7 +205,6 @@ class ApplicationDiscoverer:
             except Exception as exc:
                 errors.append(f"custom:{custom_dir}: {str(exc)}")
 
-        # Convert to list and sort by display name
         apps = sorted(discovered_map.values(), key=lambda a: a.display_name.lower())
 
         return DiscoveryResult(
@@ -200,7 +235,9 @@ class ApplicationDiscoverer:
                     normalized_name=normalize_app_name(b["display_name"]),
                     executable_path=resolved_path,
                     source="system_builtin",
+                    app_type=b.get("app_type", "executable"),
                     status="available",
+                    launch_method=b.get("launch_method", "subprocess_executable"),
                     aliases=list(b["aliases"]),
                     metadata={"executable_name": b["executable_name"]},
                 )
@@ -212,7 +249,7 @@ class ApplicationDiscoverer:
         source_name: str,
         result_map: Dict[str, ApplicationRecord],
     ):
-        """Recursively scan a directory for valid application .lnk shortcuts."""
+        """Recursively scan directory for application .lnk shortcuts."""
         if not os.path.exists(base_dir):
             return
 
@@ -222,46 +259,121 @@ class ApplicationDiscoverer:
                     continue
 
                 full_path = os.path.join(root, file_name)
-                # Ignore uninstall shortcuts or documentation
                 base_lower = file_name.lower()
-                if "uninstall" in base_lower or "remove" in base_lower or "help" in base_lower or "readme" in base_lower:
+                # Exclude obvious uninstaller / updater / doc shortcuts
+                if any(k in base_lower for k in ["uninstall", "remove", "help", "readme", "documentation", "manual"]):
                     continue
 
                 target = parse_lnk_file(full_path)
-                if not target or not target.lower().endswith(".exe"):
-                    continue
-
-                key = target.lower()
                 clean_name = os.path.splitext(file_name)[0]
                 norm_name = normalize_app_name(clean_name)
                 app_id = generate_stable_app_id(clean_name)
 
                 aliases = [norm_name]
-                # If name has multiple words, add acronym or primary word alias
                 words = norm_name.split()
                 if len(words) > 1:
                     aliases.append(words[0])
                     aliases.append(words[-1])
 
-                if key in result_map:
-                    # Update existing record with shortcut name or extra aliases
-                    existing = result_map[key]
-                    for al in aliases:
-                        if al not in existing.aliases:
-                            existing.aliases.append(al)
-                else:
-                    rec = ApplicationRecord(
-                        app_id=app_id,
-                        display_name=clean_name,
-                        normalized_name=norm_name,
-                        executable_path=target,
-                        source=source_name,
-                        status="available",
-                        aliases=list(set(aliases)),
-                        icon_path=target,
-                        metadata={"shortcut_file": full_path},
-                    )
-                    result_map[key] = rec
+                # Target may be an EXE or a shell link to an AUMID
+                if target and target.lower().endswith(".exe"):
+                    key = target.lower()
+                    if key in result_map:
+                        existing = result_map[key]
+                        for al in aliases:
+                            if al not in existing.aliases:
+                                existing.aliases.append(al)
+                        if not existing.shortcut_path:
+                            existing.shortcut_path = full_path
+                    else:
+                        rec = ApplicationRecord(
+                            app_id=app_id,
+                            display_name=clean_name,
+                            normalized_name=norm_name,
+                            executable_path=target,
+                            source=source_name,
+                            app_type="shortcut",
+                            status="available" if os.path.exists(target) else "target_missing",
+                            launch_method="subprocess_executable",
+                            shortcut_path=full_path,
+                            aliases=list(set(aliases)),
+                            icon_path=target,
+                            metadata={"shortcut_file": full_path},
+                        )
+                        result_map[key] = rec
+                elif not target:
+                    # Windows Store / Modern app shortcut
+                    key = full_path.lower()
+                    if key not in result_map:
+                        rec = ApplicationRecord(
+                            app_id=app_id,
+                            display_name=clean_name,
+                            normalized_name=norm_name,
+                            executable_path="",
+                            source=source_name,
+                            app_type="shortcut",
+                            status="available",
+                            launch_method="start_menu_shortcut",
+                            shortcut_path=full_path,
+                            aliases=list(set(aliases)),
+                            metadata={"shortcut_file": full_path},
+                        )
+                        result_map[key] = rec
+
+    def _discover_from_app_paths(self, result_map: Dict[str, ApplicationRecord]):
+        """Scan Windows App Paths in HKLM and HKCU."""
+        import winreg
+
+        hives = [
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\App Paths"),
+            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\App Paths"),
+        ]
+
+        for hive, subkey_path in hives:
+            try:
+                with winreg.OpenKey(hive, subkey_path) as root_key:
+                    num_subkeys = winreg.QueryInfoKey(root_key)[0]
+                    for i in range(num_subkeys):
+                        try:
+                            key_name = winreg.EnumKey(root_key, i)
+                            if not key_name.lower().endswith(".exe"):
+                                continue
+
+                            with winreg.OpenKey(root_key, key_name) as app_key:
+                                try:
+                                    target_exe = winreg.QueryValueEx(app_key, "")[0]
+                                except Exception:
+                                    target_exe = None
+
+                                if target_exe and isinstance(target_exe, str):
+                                    clean_exe = target_exe.strip('"')
+                                    if clean_exe.lower().endswith(".exe"):
+                                        key = clean_exe.lower()
+                                        clean_name = os.path.splitext(key_name)[0]
+                                        norm_name = normalize_app_name(clean_name)
+                                        app_id = generate_stable_app_id(clean_name)
+
+                                        if key in result_map:
+                                            existing = result_map[key]
+                                            if norm_name not in existing.aliases:
+                                                existing.aliases.append(norm_name)
+                                        else:
+                                            rec = ApplicationRecord(
+                                                app_id=app_id,
+                                                display_name=clean_name,
+                                                normalized_name=norm_name,
+                                                executable_path=clean_exe,
+                                                source="app_paths",
+                                                app_type="app_path",
+                                                status="available" if os.path.exists(clean_exe) else "target_missing",
+                                                launch_method="subprocess_executable",
+                                                aliases=[norm_name, key_name.lower()],
+                                            )
+                                            result_map[key] = rec
+                        except Exception:
+                            continue
+            except Exception:
+                continue
 
     def _discover_from_registry(self, result_map: Dict[str, ApplicationRecord]):
         """Scan standard Windows Uninstall registry keys for installed software."""
@@ -291,7 +403,6 @@ class ApplicationDiscoverer:
                                 if not disp_name or not isinstance(disp_name, str):
                                     continue
 
-                                # Ignore system updates or KB packages
                                 if disp_name.startswith("KB") or "Update for Windows" in disp_name:
                                     continue
 
@@ -300,7 +411,6 @@ class ApplicationDiscoverer:
                                 version = get_val("DisplayVersion")
                                 publisher = get_val("Publisher")
 
-                                # Determine target executable if possible
                                 target_exe = None
                                 if disp_icon and isinstance(disp_icon, str):
                                     clean_icon = disp_icon.split(",")[0].strip('"')
@@ -311,7 +421,7 @@ class ApplicationDiscoverer:
                                     if os.path.isdir(install_loc):
                                         for cand in os.listdir(install_loc):
                                             if cand.lower().endswith(".exe") and not any(
-                                                x in cand.lower() for x in ["unins", "setup", "helper", "crash"]
+                                                x in cand.lower() for x in ["unins", "setup", "helper", "crash", "update"]
                                             ):
                                                 full_cand = os.path.join(install_loc, cand)
                                                 if os.path.isfile(full_cand):
@@ -321,7 +431,6 @@ class ApplicationDiscoverer:
                                 if target_exe:
                                     key = target_exe.lower()
                                     if key in result_map:
-                                        # Enrich existing record
                                         existing = result_map[key]
                                         if not existing.version and version:
                                             existing.version = str(version)
@@ -336,7 +445,9 @@ class ApplicationDiscoverer:
                                             normalized_name=norm_name,
                                             executable_path=target_exe,
                                             source="registry",
+                                            app_type="executable",
                                             status="available",
+                                            launch_method="subprocess_executable",
                                             version=str(version) if version else None,
                                             publisher=str(publisher) if publisher else None,
                                             icon_path=disp_icon,
@@ -347,3 +458,32 @@ class ApplicationDiscoverer:
                             continue
             except Exception:
                 continue
+
+    def _discover_from_packaged_apps(self, result_map: Dict[str, ApplicationRecord]):
+        """Discover WindowsApp execution aliases from %LOCALAPPDATA%\\Microsoft\\WindowsApps."""
+        windows_apps_dir = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps")
+        if not os.path.exists(windows_apps_dir):
+            return
+
+        for fname in os.listdir(windows_apps_dir):
+            if fname.lower().endswith(".exe"):
+                full_path = os.path.join(windows_apps_dir, fname)
+                clean_name = os.path.splitext(fname)[0]
+                norm_name = normalize_app_name(clean_name)
+                app_id = generate_stable_app_id(clean_name)
+
+                key = full_path.lower()
+                if key not in result_map:
+                    rec = ApplicationRecord(
+                        app_id=app_id,
+                        display_name=clean_name,
+                        normalized_name=norm_name,
+                        executable_path=full_path,
+                        source="appx_package",
+                        app_type="packaged_app",
+                        status="available",
+                        launch_method="subprocess_executable",
+                        aliases=[norm_name, fname.lower()],
+                        metadata={"is_windows_app_alias": True},
+                    )
+                    result_map[key] = rec

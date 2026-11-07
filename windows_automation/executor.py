@@ -1,17 +1,23 @@
 """
 Safe Windows Automation Executor.
 
-Executes allowlisted desktop actions (Notepad, discovered installed applications) with:
+Executes allowlisted desktop actions with:
 1. Strict policy and authorization checking.
 2. Dynamic target resolution against the ApplicationCatalogue.
-3. Safe subprocess invocation (shell=False, no elevated privileges).
-4. Process tracking and active cancellation support.
-5. Duplicate request detection and idempotency enforcement.
-6. Truthful Windows window & process verification.
-7. Structured audit recording with sensitive data redaction.
+3. Multi-type launch mechanisms:
+   - subprocess_executable (plain EXE)
+   - start_menu_shortcut (via os.startfile / ShellExecuteW)
+   - app_paths_registry
+   - appx_packaged (via explorer shell:AppsFolder or App Execution Alias)
+4. Comprehensive launch failure diagnostics tracking stage, error, and verification.
+5. Process tracking and active cancellation support.
+6. Duplicate request detection and idempotency enforcement.
+7. Truthful Windows window & process verification.
+8. Structured audit recording with sensitive data redaction.
 """
 
 import os
+import sys
 import subprocess
 import time
 from typing import Dict, Any, Optional, Callable
@@ -20,6 +26,7 @@ from windows_automation.schemas import (
     ExecutionResult,
     VerificationEvidence,
     ApplicationRecord,
+    DiagnosticRecord,
     current_iso_timestamp,
 )
 from windows_automation.policy import WindowsActionPolicy
@@ -38,6 +45,7 @@ class WindowsAutomationExecutor:
         audit_logger: Optional[AuditLogger] = None,
         catalogue: Optional[ApplicationCatalogue] = None,
         subprocess_runner: Optional[Callable[..., Any]] = None,
+        shortcut_launcher: Optional[Callable[..., Any]] = None,
     ):
         self.catalogue = catalogue
         self.policy = policy or WindowsActionPolicy(catalogue=self.catalogue)
@@ -46,6 +54,7 @@ class WindowsAutomationExecutor:
         self.verifier = verifier or WindowsWindowVerifier()
         self.audit_logger = audit_logger or AuditLogger()
         self._subprocess_runner = subprocess_runner or subprocess.Popen
+        self._shortcut_launcher = shortcut_launcher or (os.startfile if hasattr(os, "startfile") else None)
 
         # Active process tracker: action_id -> dict {"proc": proc, "window_pid": ...}
         self._active_processes: Dict[str, Any] = {}
@@ -61,6 +70,16 @@ class WindowsAutomationExecutor:
         start_time = time.monotonic()
         started_at = current_iso_timestamp()
 
+        diag = DiagnosticRecord(
+            requested_target=request.target,
+            resolved_app_id=request.app_id,
+            discovery_source=request.resolved_record.source if request.resolved_record else None,
+            launch_method=request.resolved_record.launch_method if request.resolved_record else None,
+            target_validation_passed=False,
+            failing_stage=None,
+            exception_details=None,
+        )
+
         # Step 1: Idempotency check to prevent duplicate executions
         if request.idempotency_key:
             if request.idempotency_key in self._idempotency_cache:
@@ -71,6 +90,8 @@ class WindowsAutomationExecutor:
                     summary=f"Duplicate request blocked by idempotency key: {request.idempotency_key}",
                     details={"idempotency_key": request.idempotency_key},
                 )
+                diag.failing_stage = "idempotency_check"
+                diag.exception_details = "Duplicate request blocked by idempotency key."
                 return ExecutionResult(
                     action_id=request.action_id,
                     task_id=request.task_id,
@@ -81,11 +102,14 @@ class WindowsAutomationExecutor:
                     started_at=started_at,
                     completed_at=current_iso_timestamp(),
                     duration_ms=0,
+                    diagnostics=diag,
                 )
 
         # Step 2: Validate request format, action, and target against policy and catalogue
         is_valid, err_code, err_msg = self.policy.validate_request(request)
         if not is_valid:
+            diag.failing_stage = "validation"
+            diag.exception_details = err_msg
             self.audit_logger.log_event(
                 event_type="request_validation_failed",
                 action_id=request.action_id,
@@ -103,11 +127,20 @@ class WindowsAutomationExecutor:
                 started_at=started_at,
                 completed_at=current_iso_timestamp(),
                 duration_ms=int((time.monotonic() - start_time) * 1000),
+                diagnostics=diag,
             )
 
-        # Step 3: Verify authorization & permissions (never invent approvals)
+        diag.target_validation_passed = True
+        if request.resolved_record:
+            diag.resolved_app_id = request.resolved_record.app_id
+            diag.discovery_source = request.resolved_record.source
+            diag.launch_method = request.resolved_record.launch_method
+
+        # Step 3: Verify authorization & permissions
         is_auth, auth_err_code, auth_err_msg = self.policy.check_authorization(request)
         if not is_auth:
+            diag.failing_stage = "authorization"
+            diag.exception_details = auth_err_msg
             self.audit_logger.log_event(
                 event_type="authorization_check_failed",
                 action_id=request.action_id,
@@ -125,11 +158,14 @@ class WindowsAutomationExecutor:
                 started_at=started_at,
                 completed_at=current_iso_timestamp(),
                 duration_ms=int((time.monotonic() - start_time) * 1000),
+                diagnostics=diag,
             )
 
-        # Step 4: Resolve verified executable path
-        executable_path = self.policy.resolve_executable_path(request.target, request=request)
-        if not executable_path:
+        # Step 4: Resolve verified target path
+        resolved_path = self.policy.resolve_executable_path(request.target, request=request)
+        if not resolved_path:
+            diag.failing_stage = "target_resolution"
+            diag.exception_details = f"Could not resolve executable for target '{request.target}'"
             return ExecutionResult(
                 action_id=request.action_id,
                 task_id=request.task_id,
@@ -140,10 +176,13 @@ class WindowsAutomationExecutor:
                 started_at=started_at,
                 completed_at=current_iso_timestamp(),
                 duration_ms=int((time.monotonic() - start_time) * 1000),
+                diagnostics=diag,
             )
 
         # Step 5: Check pre-launch cancellation checkpoint
         if request.action_id in self._cancelled_actions:
+            diag.failing_stage = "pre_launch_cancellation"
+            diag.exception_details = "Action cancelled before launch"
             self.audit_logger.log_event(
                 event_type="action_cancelled_pre_launch",
                 action_id=request.action_id,
@@ -160,33 +199,52 @@ class WindowsAutomationExecutor:
                 started_at=started_at,
                 completed_at=current_iso_timestamp(),
                 duration_ms=int((time.monotonic() - start_time) * 1000),
+                diagnostics=diag,
             )
 
-        # Step 6: Safe execution (shell=False, bounded parameters)
-        launch_args = [executable_path]
-        extra_args = request.parameters.get("args", []) if request.parameters else []
-        launch_args.extend([str(a) for a in extra_args])
+        # Step 6: Safe execution according to launch method
+        method = "subprocess_executable"
+        if request.resolved_record:
+            method = request.resolved_record.launch_method
+        elif resolved_path.lower().endswith(".lnk"):
+            method = "start_menu_shortcut"
+
+        diag.launch_method = method
 
         self.audit_logger.log_event(
             event_type="launching_process",
             action_id=request.action_id,
             task_id=request.task_id,
-            summary=f"Launching application '{request.target}'",
-            details={"executable": executable_path, "args": extra_args},
+            summary=f"Launching application '{request.target}' via {method}",
+            details={"target_path": resolved_path, "method": method},
         )
 
         proc = None
+        spawned_pid = None
+
         try:
-            # Strictly shell=False to prevent shell injection or arbitrary commands
-            proc = self._subprocess_runner(
-                launch_args,
-                shell=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            self._active_processes[request.action_id] = proc
+            if method == "start_menu_shortcut" and self._shortcut_launcher:
+                # Launch via Windows shell link handler safely
+                self._shortcut_launcher(resolved_path)
+            else:
+                # Standard subprocess launch (shell=False strictly)
+                launch_args = [resolved_path]
+                extra_args = request.parameters.get("args", []) if request.parameters else []
+                launch_args.extend([str(a) for a in extra_args])
+
+                proc = self._subprocess_runner(
+                    launch_args,
+                    shell=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if proc and hasattr(proc, "pid"):
+                    spawned_pid = proc.pid
+                    self._active_processes[request.action_id] = proc
         except Exception as exc:
+            diag.failing_stage = "launch_spawn"
+            diag.exception_details = str(exc)
             self.audit_logger.log_event(
                 event_type="launch_failure",
                 action_id=request.action_id,
@@ -204,11 +262,14 @@ class WindowsAutomationExecutor:
                 started_at=started_at,
                 completed_at=current_iso_timestamp(),
                 duration_ms=int((time.monotonic() - start_time) * 1000),
+                diagnostics=diag,
             )
 
         # Step 7: Check post-launch cancellation checkpoint
         if request.action_id in self._cancelled_actions:
-            self._terminate_process(proc)
+            diag.failing_stage = "post_launch_cancellation"
+            if proc:
+                self._terminate_process(proc)
             self._active_processes.pop(request.action_id, None)
             return ExecutionResult(
                 action_id=request.action_id,
@@ -220,28 +281,35 @@ class WindowsAutomationExecutor:
                 started_at=started_at,
                 completed_at=current_iso_timestamp(),
                 duration_ms=int((time.monotonic() - start_time) * 1000),
+                diagnostics=diag,
             )
 
-        # Step 8: Verify Application & Window Readiness (Distinguish process from window)
+        # Step 8: Verify Application & Window Readiness
         def is_alive(pid: int) -> bool:
-            return proc.poll() is None
+            if proc and hasattr(proc, "poll"):
+                return proc.poll() is None
+            return True
 
-        # Give bounded verification time
         verify_timeout = min(request.timeout_seconds, 10.0)
+        app_name = os.path.basename(resolved_path) if resolved_path else request.target
+
         evidence = self.verifier.verify_window_readiness(
-            pid=proc.pid,
-            process_name=os.path.basename(executable_path),
+            pid=spawned_pid or 0,
+            process_name=app_name,
             timeout_seconds=verify_timeout,
             is_process_alive_check=is_alive,
         )
 
         completed_at = current_iso_timestamp()
         duration_ms = int((time.monotonic() - start_time) * 1000)
+        diag.verification_summary = evidence.details
 
         # Step 9: Evaluate verification outcome
         if not evidence.verified:
-            # Clean up unverified process
-            self._terminate_process(proc)
+            diag.failing_stage = "verification"
+            diag.exception_details = evidence.details.get("reason", "Verification timed out or window unconfirmed")
+            if proc:
+                self._terminate_process(proc)
             self._active_processes.pop(request.action_id, None)
 
             err_code = "ERR_TIMEOUT" if (evidence.verification_status == "timed_out" or "timeout" in evidence.method) else "ERR_VERIFICATION_FAILED"
@@ -267,10 +335,11 @@ class WindowsAutomationExecutor:
                 duration_ms=duration_ms,
                 verification=evidence,
                 resolved_record=request.resolved_record,
+                diagnostics=diag,
             )
 
         # Success - Confirmed process and window ready
-        window_pid = evidence.details.get("window_pid")
+        window_pid = evidence.details.get("window_pid") or spawned_pid
         self._active_processes[request.action_id] = {
             "proc": proc,
             "window_pid": window_pid,
@@ -280,9 +349,9 @@ class WindowsAutomationExecutor:
             event_type="action_completed_verified",
             action_id=request.action_id,
             task_id=request.task_id,
-            summary=f"Successfully launched and verified '{request.target}' (PID: {proc.pid})",
+            summary=f"Successfully launched and verified '{request.target}' (PID: {window_pid})",
             details={
-                "process_id": proc.pid,
+                "process_id": spawned_pid,
                 "window_pid": window_pid,
                 "window_handle": evidence.details.get("window_handle"),
                 "window_title": evidence.details.get("window_title"),
@@ -301,10 +370,10 @@ class WindowsAutomationExecutor:
             duration_ms=duration_ms,
             verification=evidence,
             resolved_record=request.resolved_record,
+            diagnostics=diag,
             audit=audit_record,
         )
 
-        # Store in idempotency cache
         if request.idempotency_key:
             self._idempotency_cache[request.idempotency_key] = result
 

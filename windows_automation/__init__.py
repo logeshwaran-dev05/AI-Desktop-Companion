@@ -3,7 +3,7 @@ Windows Automation — Installed Application Discovery & Safe Launch.
 
 Created by: Logeshwaran D (Windows Automation — Safe Actions & Verification, JM Vertex Technologies)
 Module: windows_automation
-Milestone: Milestone 2 — Installed Application Discovery & Controlled Launch
+Milestone: Complete Windows Automation & Universal App Launching
 """
 
 from windows_automation.schemas import (
@@ -15,6 +15,7 @@ from windows_automation.schemas import (
     VerificationEvidence,
     AuthorizationDecision,
     AuditRecord,
+    DiagnosticRecord,
 )
 from windows_automation.discovery import (
     ApplicationDiscoverer,
@@ -32,6 +33,7 @@ __all__ = [
     "ApplicationRecord",
     "DiscoveryResult",
     "ResolutionResult",
+    "DiagnosticRecord",
     "ApplicationDiscoverer",
     "ApplicationCatalogue",
     "WindowsActionPolicy",

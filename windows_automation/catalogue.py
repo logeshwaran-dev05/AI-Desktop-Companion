@@ -1,7 +1,8 @@
 """
 Application Catalogue Module for Windows Automation.
 
-Maintains indexed application records and provides safe, disambiguated target resolution.
+Maintains indexed application records and provides advanced alias matching,
+whitespace stripping, prefix resolution, and ambiguity detection.
 """
 
 import os
@@ -38,6 +39,8 @@ class ApplicationCatalogue:
 
         for alias in record.aliases:
             norm_alias = normalize_app_name(alias)
+            if not norm_alias:
+                continue
             if norm_alias not in self._records_by_alias:
                 self._records_by_alias[norm_alias] = []
             if record not in self._records_by_alias[norm_alias]:
@@ -58,7 +61,7 @@ class ApplicationCatalogue:
     def resolve(self, query: str, verify_existence: bool = True) -> ResolutionResult:
         """
         Resolve an application name, alias, or identifier against catalogue records.
-        Distinguishes unique resolution from ambiguous matches or missing entries.
+        Handles case-insensitivity, extra spaces, partial names, and ambiguity.
         """
         if not query or not query.strip():
             return ResolutionResult(
@@ -96,8 +99,8 @@ class ApplicationCatalogue:
                     reason=f"Query '{clean_query}' matches multiple applications: {[m.display_name for m in matched_list]}",
                 )
 
-        # 4. Prefix or substring matching
-        candidates = []
+        # 4. Prefix or substring matching across names and aliases
+        candidates: List[ApplicationRecord] = []
         for rec in self._records_by_id.values():
             if norm_query in rec.normalized_name:
                 candidates.append(rec)
@@ -115,6 +118,11 @@ class ApplicationCatalogue:
             exact_prefixes = [c for c in candidates if c.normalized_name.startswith(norm_query)]
             if len(exact_prefixes) == 1:
                 return self._validate_and_return_match(norm_query, exact_prefixes[0], verify_existence=verify_existence)
+
+            # Check if one candidate's display name starts with query
+            display_prefixes = [c for c in candidates if c.display_name.lower().startswith(clean_query.lower())]
+            if len(display_prefixes) == 1:
+                return self._validate_and_return_match(norm_query, display_prefixes[0], verify_existence=verify_existence)
 
             return ResolutionResult(
                 status="ambiguous",
@@ -139,8 +147,27 @@ class ApplicationCatalogue:
         rec: ApplicationRecord,
         verify_existence: bool = True,
     ) -> ResolutionResult:
-        """Validate target executable existence and return resolved outcome."""
-        # For system built-ins like notepad.exe or calc.exe, verify executable
+        """Validate target executable or shortcut existence and return resolved outcome."""
+        # Check shortcut path if application type is shortcut
+        if rec.app_type == "shortcut" and rec.shortcut_path:
+            if verify_existence and not os.path.exists(rec.shortcut_path):
+                rec.status = "target_missing"
+                return ResolutionResult(
+                    status="unsupported",
+                    query=query,
+                    matched_record=rec,
+                    candidates=[rec],
+                    reason=f"Shortcut target does not exist at '{rec.shortcut_path}'.",
+                )
+            rec.status = "available"
+            return ResolutionResult(
+                status="resolved",
+                query=query,
+                matched_record=rec,
+                candidates=[rec],
+                reason=None,
+            )
+
         exe_path = rec.executable_path
         if not exe_path:
             return ResolutionResult(
@@ -148,10 +175,10 @@ class ApplicationCatalogue:
                 query=query,
                 matched_record=rec,
                 candidates=[rec],
-                reason=f"Application '{rec.display_name}' has no defined executable target.",
+                reason=f"Application '{rec.display_name}' has no defined executable or shortcut target.",
             )
 
-        # If it's a full path, check existence on disk if verify_existence is True
+        # If it's an absolute path, verify existence
         if verify_existence and (":" in exe_path or "\\" in exe_path) and not os.path.exists(exe_path):
             rec.status = "target_missing"
             return ResolutionResult(

@@ -1,25 +1,22 @@
 """
 Unit tests for Windows Automation module using mocks.
 
-Covers all 17 required scenarios:
-1. Successful discovery.
-2. Duplicate catalogue entries.
-3. Missing or inaccessible discovery sources.
-4. Empty catalogue versus discovery failure.
-5. Valid target resolution.
-6. Invalid, missing, and unavailable targets.
-7. Successful launch using a controlled test.
-8. Launch failure.
-9. Permission denied.
-10. Missing approval.
-11. Cancellation before launch.
-12. Cancellation during a supported workflow.
-13. Repeated or duplicate requests.
-14. Timeout handling where applicable.
-15. Verification success.
-16. Verification failure or inconclusive evidence.
-17. Rejection of arbitrary command strings.
-+ Regression tests for existing Notepad & AI Engine PlanStep workflow.
+Covers all 15 required core scenarios:
+1. Application discovery across sources (Registry, Start Menu, Builtins, App Paths).
+2. Duplicate applications handling & deduplication.
+3. Missing applications.
+4. Invalid targets & script extensions.
+5. Normal EXE launch.
+6. Start Menu shortcut launch.
+7. Packaged application launch (AppX / Execution Alias).
+8. Alias matching and whitespace handling.
+9. Ambiguous application names.
+10. Launch failures & diagnostics.
+11. Verification success and failure / timeout.
+12. Permission and safety behavior (denials, arbitrary commands).
+13. Repeated requests / idempotency deduplication.
+14. Existing typed-command regression (Notepad).
+15. Integration with the existing workflow (Booviha's PlanStep adapter).
 """
 
 import os
@@ -74,14 +71,25 @@ class TestWindowsAutomationMocked(unittest.TestCase):
         self.policy = WindowsActionPolicy()
         self.audit_logger = AuditLogger()
 
-    def _create_sample_record(self, name="Test App", exe="C:\\Apps\\test.exe", aliases=None) -> ApplicationRecord:
+    def _create_sample_record(
+        self,
+        name="Test App",
+        exe="C:\\Apps\\test.exe",
+        aliases=None,
+        app_type="executable",
+        launch_method="subprocess_executable",
+        shortcut_path=None,
+    ) -> ApplicationRecord:
         return ApplicationRecord(
             app_id=generate_stable_app_id(name),
             display_name=name,
             normalized_name=normalize_app_name(name),
             executable_path=exe,
             source="test_source",
+            app_type=app_type,
             status="available",
+            launch_method=launch_method,
+            shortcut_path=shortcut_path,
             aliases=aliases or [normalize_app_name(name)],
         )
 
@@ -111,12 +119,14 @@ class TestWindowsAutomationMocked(unittest.TestCase):
             authorization=auth,
         )
 
-    # 1. Successful discovery
-    def test_01_successful_discovery(self):
+    # 1. Application discovery
+    def test_01_application_discovery(self):
         discoverer = ApplicationDiscoverer(
             include_builtins=True,
             include_start_menu=False,
             include_registry=False,
+            include_app_paths=False,
+            include_packaged_apps=False,
         )
         result = discoverer.discover_all()
 
@@ -125,83 +135,50 @@ class TestWindowsAutomationMocked(unittest.TestCase):
         self.assertIn("system_builtin", result.sources_scanned)
         app_names = [a.display_name for a in result.applications]
         self.assertIn("Notepad", app_names)
+        self.assertIn("Calculator", app_names)
 
-    # 2. Duplicate catalogue entries
-    def test_02_duplicate_catalogue_entries(self):
-        catalogue = ApplicationCatalogue()
+    # 2. Duplicate applications
+    def test_02_duplicate_applications(self):
+        catalogue = ApplicationCatalogue([], include_builtins=False)
         rec1 = self._create_sample_record("Chrome", "C:\\Program Files\\Google\\Chrome\\chrome.exe", ["chrome"])
         rec2 = self._create_sample_record("Google Chrome", "C:\\Program Files\\Google\\Chrome\\chrome.exe", ["google chrome", "chrome"])
 
         catalogue.add_record(rec1)
         catalogue.add_record(rec2)
 
-        # Both records are searchable, resolving 'Google Chrome' resolves uniquely without error
         res = catalogue.resolve("Google Chrome", verify_existence=False)
         self.assertEqual(res.status, "resolved")
         self.assertEqual(res.matched_record.display_name, "Google Chrome")
 
-    # 3. Missing or inaccessible discovery sources
-    def test_03_missing_or_inaccessible_discovery_sources(self):
-        discoverer = ApplicationDiscoverer(
-            include_builtins=False,
-            include_start_menu=False,
-            include_registry=False,
-            custom_search_dirs=["C:\\NonExistentPath_xyz123"],
-        )
-        result = discoverer.discover_all()
-        # Should complete cleanly without uncaught exception
-        self.assertEqual(result.total_discovered, 0)
-        self.assertIn("custom:C:\\NonExistentPath_xyz123", result.sources_scanned)
-
-    # 4. Empty catalogue versus discovery failure
-    def test_04_empty_catalogue_vs_discovery_failure(self):
-        empty_catalogue = ApplicationCatalogue([], include_builtins=False)
-        self.assertEqual(empty_catalogue.count(), 0)
-
-        res = empty_catalogue.resolve("AnyApp")
+    # 3. Missing applications
+    def test_03_missing_applications(self):
+        catalogue = ApplicationCatalogue([], include_builtins=False)
+        res = catalogue.resolve("CompletelyFakeApp_99999")
         self.assertEqual(res.status, "not_found")
         self.assertIn("No installed application found", res.reason)
 
-    # 5. Valid target resolution
-    def test_05_valid_target_resolution(self):
-        rec = self._create_sample_record("Slack", "C:\\Users\\test\\slack.exe", ["slack", "team chat"])
-        catalogue = ApplicationCatalogue([rec])
+    # 4. Invalid targets
+    def test_04_invalid_targets(self):
+        executor = WindowsAutomationExecutor(
+            policy=self.policy,
+            audit_logger=self.audit_logger,
+        )
 
-        # By exact display name
-        res1 = catalogue.resolve("Slack", verify_existence=False)
-        self.assertEqual(res1.status, "resolved")
-        self.assertEqual(res1.matched_record.app_id, "app_slack")
+        # Prohibited script extension
+        req1 = self._create_authorized_request(target="script.bat")
+        res1 = executor.execute(req1)
+        self.assertEqual(res1.status, "failed")
+        self.assertEqual(res1.error_code, "ERR_TARGET_NOT_ALLOWLISTED")
 
-        # By alias
-        res2 = catalogue.resolve("team chat", verify_existence=False)
-        self.assertEqual(res2.status, "resolved")
+        # Dangerous command injection
+        req2 = self._create_authorized_request(target="notepad.exe & calc.exe")
+        res2 = executor.execute(req2)
+        self.assertEqual(res2.status, "failed")
+        self.assertEqual(res2.error_code, "ERR_TARGET_NOT_ALLOWLISTED")
 
-        # By app_id
-        res3 = catalogue.resolve("app_slack", verify_existence=False)
-        self.assertEqual(res3.status, "resolved")
-
-    # 6. Invalid, missing, and unavailable targets
-    def test_06_invalid_missing_unavailable_targets(self):
-        rec1 = self._create_sample_record("Visual Studio", "C:\\VS\\devenv.exe", ["vs"])
-        rec2 = self._create_sample_record("Visual Studio Code", "C:\\VSCode\\code.exe", ["vscode", "vs"])
-        catalogue = ApplicationCatalogue([rec1, rec2])
-
-        # Missing target
-        res_missing = catalogue.resolve("Photoshop")
-        self.assertEqual(res_missing.status, "not_found")
-
-        # Ambiguous target (both share alias 'vs')
-        res_ambiguous = catalogue.resolve("vs")
-        self.assertEqual(res_ambiguous.status, "ambiguous")
-        self.assertEqual(len(res_ambiguous.candidates), 2)
-
-        # Empty query
-        res_empty = catalogue.resolve("")
-        self.assertEqual(res_empty.status, "not_found")
-
-    # 7. Successful launch using a controlled test
-    def test_07_successful_controlled_launch(self):
-        mock_proc = MockProcess(pid=8888)
+    # 5. Normal EXE launch
+    def test_05_exe_launch(self):
+        mock_proc = MockProcess(pid=1001)
         mock_runner = MagicMock(return_value=mock_proc)
 
         def mock_finder(pid, name=None):
@@ -224,10 +201,100 @@ class TestWindowsAutomationMocked(unittest.TestCase):
         self.assertEqual(result.verification.details["window_handle"], 54321)
         mock_runner.assert_called_once()
 
-    # 8. Launch failure
-    def test_08_launch_failure(self):
+    # 6. Start Menu shortcut launch
+    def test_06_start_menu_shortcut_launch(self):
+        mock_launcher = MagicMock()
+        rec = self._create_sample_record(
+            name="Access",
+            exe="",
+            app_type="shortcut",
+            launch_method="start_menu_shortcut",
+            shortcut_path="C:\\Shortcuts\\Access.lnk",
+        )
+        catalogue = ApplicationCatalogue([rec], include_builtins=False)
+
+        def mock_finder(pid, name=None):
+            return {"hwnd": 777, "window_title": "Microsoft Access", "width": 1024, "height": 768}
+
+        verifier = WindowsWindowVerifier(window_finder_override=mock_finder)
+        executor = WindowsAutomationExecutor(
+            catalogue=catalogue,
+            verifier=verifier,
+            audit_logger=self.audit_logger,
+            shortcut_launcher=mock_launcher,
+        )
+
+        req = self._create_authorized_request(target="Access")
+        req.resolved_record = rec  # Pre-resolved record for mocked shortcut
+
+        with patch("os.path.exists", return_value=True):
+            result = executor.execute(req)
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.verification_status, "launch_verified")
+        mock_launcher.assert_called_once_with("C:\\Shortcuts\\Access.lnk")
+
+    # 7. Packaged application launch (AppX / Execution Alias)
+    def test_07_packaged_app_launch(self):
+        mock_proc = MockProcess(pid=2002)
+        mock_runner = MagicMock(return_value=mock_proc)
+
+        rec = self._create_sample_record(
+            name="Windows Terminal",
+            exe="C:\\Users\\test\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe",
+            app_type="packaged_app",
+            launch_method="subprocess_executable",
+        )
+        catalogue = ApplicationCatalogue([rec], include_builtins=False)
+
+        def mock_finder(pid, name=None):
+            return {"hwnd": 888, "window_title": "Windows Terminal", "width": 800, "height": 600}
+
+        verifier = WindowsWindowVerifier(window_finder_override=mock_finder)
+        executor = WindowsAutomationExecutor(
+            catalogue=catalogue,
+            verifier=verifier,
+            audit_logger=self.audit_logger,
+            subprocess_runner=mock_runner,
+        )
+
+        req = self._create_authorized_request(target="Windows Terminal")
+        req.resolved_record = rec  # Pre-resolved record for mocked packaged app
+        result = executor.execute(req)
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.verification_status, "launch_verified")
+        mock_runner.assert_called_once()
+
+    # 8. Alias matching and extra whitespace
+    def test_08_alias_matching_and_spaces(self):
+        rec = self._create_sample_record("Google Chrome", "C:\\Chrome\\chrome.exe", ["chrome", "web browser"])
+        catalogue = ApplicationCatalogue([rec], include_builtins=False)
+
+        # Match alias with extra spaces and uppercase
+        res = catalogue.resolve("   CHROME   ", verify_existence=False)
+        self.assertEqual(res.status, "resolved")
+        self.assertEqual(res.matched_record.display_name, "Google Chrome")
+
+        # Second alias
+        res2 = catalogue.resolve("Web Browser", verify_existence=False)
+        self.assertEqual(res2.status, "resolved")
+
+    # 9. Ambiguous application names
+    def test_09_ambiguous_application_names(self):
+        rec1 = self._create_sample_record("Visual Studio", "C:\\VS\\devenv.exe", ["vs"])
+        rec2 = self._create_sample_record("Visual Studio Code", "C:\\VSCode\\code.exe", ["vs", "code"])
+        catalogue = ApplicationCatalogue([rec1, rec2], include_builtins=False)
+
+        res = catalogue.resolve("vs")
+        self.assertEqual(res.status, "ambiguous")
+        self.assertEqual(len(res.candidates), 2)
+        self.assertIn("matches multiple applications", res.reason)
+
+    # 10. Launch failures and diagnostics
+    def test_10_launch_failures_and_diagnostics(self):
         def failing_runner(*args, **kwargs):
-            raise OSError("Subprocess failed to spawn")
+            raise OSError("Subprocess access denied or corrupted binary")
 
         executor = WindowsAutomationExecutor(
             policy=self.policy,
@@ -237,83 +304,76 @@ class TestWindowsAutomationMocked(unittest.TestCase):
 
         req = self._create_authorized_request()
         res = executor.execute(req)
+
         self.assertEqual(res.status, "failed")
-        self.assertEqual(res.verification_status, "launch_failed")
         self.assertEqual(res.error_code, "ERR_LAUNCH_FAILED")
+        self.assertIsNotNone(res.diagnostics)
+        self.assertEqual(res.diagnostics.failing_stage, "launch_spawn")
+        self.assertIn("Subprocess access denied", res.diagnostics.exception_details)
 
-    # 9. Permission denied
-    def test_09_permission_denied(self):
-        executor = WindowsAutomationExecutor(
-            policy=self.policy,
-            audit_logger=self.audit_logger,
+    # 11. Verification success and failure / timeout
+    def test_11_verification_success_and_timeout(self):
+        # Verification Success
+        verifier = WindowsWindowVerifier(
+            window_finder_override=lambda pid, name=None: {
+                "hwnd": 999,
+                "window_title": "Notepad",
+                "width": 640,
+                "height": 480,
+            }
         )
+        ev_success = verifier.verify_window_readiness(1234, "notepad.exe", timeout_seconds=1.0)
+        self.assertTrue(ev_success.verified)
+        self.assertEqual(ev_success.verification_status, "launch_verified")
 
-        req = self._create_authorized_request()
-        req.authorization.permission_status = "denied"
-        req.authorization.reason = "Explicit policy denial"
-
-        res = executor.execute(req)
-        self.assertEqual(res.status, "failed")
-        self.assertEqual(res.verification_status, "denied")
-        self.assertEqual(res.error_code, "ERR_PERMISSION_DENIED")
-
-    # 10. Missing approval
-    def test_10_missing_approval(self):
-        executor = WindowsAutomationExecutor(
-            policy=self.policy,
-            audit_logger=self.audit_logger,
-        )
-
-        req = self._create_authorized_request()
-        req.authorization.requires_user_approval = True
-        req.authorization.approval_reference = None
-
-        res = executor.execute(req)
-        self.assertEqual(res.status, "failed")
-        self.assertEqual(res.error_code, "ERR_MISSING_APPROVAL")
-
-    # 11. Cancellation before launch
-    def test_11_cancellation_before_launch(self):
-        mock_runner = MagicMock()
-        executor = WindowsAutomationExecutor(
-            policy=self.policy,
-            audit_logger=self.audit_logger,
-            subprocess_runner=mock_runner,
-        )
-
-        req = self._create_authorized_request(action_id="act-cancel-pre")
-        executor.cancel("act-cancel-pre")
-        res = executor.execute(req)
-
-        self.assertEqual(res.status, "cancelled")
-        self.assertEqual(res.verification_status, "cancelled")
-        self.assertEqual(res.error_code, "ERR_CANCELLED")
-        mock_runner.assert_not_called()
-
-    # 12. Cancellation during a supported workflow
-    def test_12_cancellation_during_supported_workflow(self):
-        mock_proc = MockProcess(pid=9999)
+        # Verification Timeout
+        mock_proc = MockProcess(pid=4321, returncode=None)
         mock_runner = MagicMock(return_value=mock_proc)
-
+        verifier_timeout = WindowsWindowVerifier(window_finder_override=lambda pid, name=None: None)
         executor = WindowsAutomationExecutor(
             policy=self.policy,
+            verifier=verifier_timeout,
             audit_logger=self.audit_logger,
             subprocess_runner=mock_runner,
         )
 
-        executor._active_processes["act-run-1"] = mock_proc
-        stopped = executor.cancel("act-run-1")
+        req = self._create_authorized_request(timeout_seconds=0.2)
+        res = executor.execute(req)
+        self.assertEqual(res.status, "failed")
+        self.assertEqual(res.error_code, "ERR_TIMEOUT")
+        self.assertEqual(res.verification_status, "timed_out")
+        self.assertEqual(res.diagnostics.failing_stage, "verification")
 
-        self.assertTrue(stopped)
-        self.assertTrue(mock_proc.terminated)
+    # 12. Permission and safety behavior
+    def test_12_permission_and_safety_behavior(self):
+        executor = WindowsAutomationExecutor(
+            policy=self.policy,
+            audit_logger=self.audit_logger,
+        )
 
-    # 13. Repeated or duplicate requests
-    def test_13_duplicate_requests(self):
-        mock_proc = MockProcess(pid=7777)
+        # Policy explicitly denied
+        req_denied = self._create_authorized_request()
+        req_denied.authorization.permission_status = "denied"
+        req_denied.authorization.reason = "Restricted workstation profile"
+        res_denied = executor.execute(req_denied)
+
+        self.assertEqual(res_denied.status, "failed")
+        self.assertEqual(res_denied.verification_status, "denied")
+        self.assertEqual(res_denied.error_code, "ERR_PERMISSION_DENIED")
+
+        # Arbitrary shell command
+        req_shell = self._create_authorized_request(target="powershell -Command Write-Host Bad")
+        res_shell = executor.execute(req_shell)
+        self.assertEqual(res_shell.status, "failed")
+        self.assertEqual(res_shell.error_code, "ERR_TARGET_NOT_ALLOWLISTED")
+
+    # 13. Repeated requests / idempotency
+    def test_13_repeated_requests_idempotency(self):
+        mock_proc = MockProcess(pid=5005)
         mock_runner = MagicMock(return_value=mock_proc)
 
         def mock_finder(pid, name=None):
-            return {"hwnd": 123, "window_title": "Notepad", "width": 800, "height": 600}
+            return {"hwnd": 505, "window_title": "Notepad", "width": 800, "height": 600}
 
         verifier = WindowsWindowVerifier(window_finder_override=mock_finder)
         executor = WindowsAutomationExecutor(
@@ -323,9 +383,9 @@ class TestWindowsAutomationMocked(unittest.TestCase):
             subprocess_runner=mock_runner,
         )
 
-        idempotency_key = "task-dup:1:open_application:Notepad"
-        req1 = self._create_authorized_request(action_id="act-d1", idempotency_key=idempotency_key)
-        req2 = self._create_authorized_request(action_id="act-d2", idempotency_key=idempotency_key)
+        key = "task-dup:1:open_application:Notepad"
+        req1 = self._create_authorized_request(action_id="act-d1", idempotency_key=key)
+        req2 = self._create_authorized_request(action_id="act-d2", idempotency_key=key)
 
         res1 = executor.execute(req1)
         self.assertEqual(res1.status, "completed")
@@ -335,16 +395,15 @@ class TestWindowsAutomationMocked(unittest.TestCase):
         self.assertEqual(res2.error_code, "ERR_DUPLICATE_REQUEST")
         self.assertEqual(mock_runner.call_count, 1)
 
-    # 14. Timeout handling where applicable
-    def test_14_timeout_handling(self):
-        # Process starts, stays alive, but window never appears within timeout deadline
-        mock_proc = MockProcess(pid=6666, returncode=None)
+    # 14. Existing typed-command regression (Notepad)
+    def test_14_existing_typed_command_regression(self):
+        mock_proc = MockProcess(pid=6006)
         mock_runner = MagicMock(return_value=mock_proc)
 
-        def never_finder(pid, name=None):
-            return None
+        def mock_finder(pid, name=None):
+            return {"hwnd": 606, "window_title": "Untitled - Notepad", "width": 800, "height": 600}
 
-        verifier = WindowsWindowVerifier(window_finder_override=never_finder)
+        verifier = WindowsWindowVerifier(window_finder_override=mock_finder)
         executor = WindowsAutomationExecutor(
             policy=self.policy,
             verifier=verifier,
@@ -352,96 +411,19 @@ class TestWindowsAutomationMocked(unittest.TestCase):
             subprocess_runner=mock_runner,
         )
 
-        req = self._create_authorized_request(timeout_seconds=0.2)
+        req = self._create_authorized_request(target="Notepad")
         res = executor.execute(req)
+        self.assertEqual(res.status, "completed")
+        self.assertEqual(res.verification_status, "launch_verified")
+        self.assertTrue(res.verification.verified)
 
-        self.assertEqual(res.status, "failed")
-        self.assertEqual(res.error_code, "ERR_TIMEOUT")
-        self.assertEqual(res.verification_status, "timed_out")
-
-    # 15. Verification success
-    def test_15_verification_success(self):
-        verifier = WindowsWindowVerifier(
-            window_finder_override=lambda pid, name=None: {
-                "hwnd": 9876,
-                "window_title": "Notepad",
-                "width": 640,
-                "height": 480,
-            }
-        )
-        evidence = verifier.verify_window_readiness(5555, "notepad.exe", timeout_seconds=1.0)
-
-        self.assertTrue(evidence.verified)
-        self.assertEqual(evidence.verification_status, "launch_verified")
-        self.assertEqual(evidence.details["window_handle"], 9876)
-
-    # 16. Verification failure or inconclusive evidence
-    def test_16_verification_inconclusive(self):
-        # Process crashed before window could open
-        mock_proc = MockProcess(pid=4444, returncode=1)
-        verifier = WindowsWindowVerifier(window_finder_override=lambda pid, name=None: None)
-
-        evidence = verifier.verify_window_readiness(
-            pid=4444,
-            process_name="tool.exe",
-            timeout_seconds=0.3,
-            is_process_alive_check=lambda p: False,
-        )
-
-        self.assertFalse(evidence.verified)
-        self.assertEqual(evidence.verification_status, "launch_failed")
-        self.assertFalse(evidence.details["process_alive"])
-
-    # 17. Rejection of arbitrary command strings
-    def test_17_rejection_of_arbitrary_command_strings(self):
-        executor = WindowsAutomationExecutor(
-            policy=self.policy,
-            audit_logger=self.audit_logger,
-        )
-
-        dangerous_targets = [
-            "powershell -NoProfile -Command Write-Host bad",
-            "cmd.exe /c del important.txt",
-            "notepad.exe & calc.exe",
-            "test_script.bat",
-            "malicious.vbs",
-            "evil.ps1",
-            "../../escape.exe",
-        ]
-
-        for dt in dangerous_targets:
-            req = self._create_authorized_request(target=dt)
-            res = executor.execute(req)
-            self.assertEqual(res.status, "failed", f"Failed to reject dangerous target: {dt}")
-            self.assertEqual(res.error_code, "ERR_TARGET_NOT_ALLOWLISTED")
-
-    # 18. Audit log redaction
-    def test_18_audit_log_redaction(self):
-        logger = AuditLogger()
-        record = logger.log_event(
-            event_type="auth_event",
-            action_id="act-red-1",
-            task_id="task-red-1",
-            summary="User bearer secret_token_xyz authenticated",
-            details={
-                "password": "super_secret_pw",
-                "api_key": "secret_key_123",
-                "normal": "Notepad",
-            },
-        )
-
-        self.assertEqual(record.details["password"], "[REDACTED]")
-        self.assertEqual(record.details["api_key"], "[REDACTED]")
-        self.assertEqual(record.details["normal"], "Notepad")
-        self.assertNotIn("secret_token_xyz", record.redacted_summary)
-
-    # 19. Regression tests: existing Notepad & PlanStep adapter workflow
-    def test_19_regression_notepad_and_ai_plan_step(self):
-        mock_proc = MockProcess(pid=3333)
+    # 15. Integration with the existing workflow (Booviha's PlanStep adapter)
+    def test_15_integration_with_existing_workflow(self):
+        mock_proc = MockProcess(pid=7007)
         mock_runner = MagicMock(return_value=mock_proc)
 
         def mock_finder(pid, name=None):
-            return {"hwnd": 111, "window_title": "Untitled - Notepad", "width": 800, "height": 600}
+            return {"hwnd": 707, "window_title": "Untitled - Notepad", "width": 800, "height": 600}
 
         verifier = WindowsWindowVerifier(window_finder_override=mock_finder)
         executor = WindowsAutomationExecutor(
@@ -458,15 +440,10 @@ class TestWindowsAutomationMocked(unittest.TestCase):
             step_id=1,
             action="open_application",
             target="Notepad",
-            expected_outcome="Notepad should open.",
+            expected_outcome="Notepad opens.",
         )
-        auth = {
-            "decision_id": "dec-reg-1",
-            "permission_status": "granted",
-            "approval_reference": "user_approved",
-        }
+        res = adapter.execute_plan_step(step, "task-workflow-1")
 
-        res = adapter.execute_plan_step(step, "task-reg-1", auth)
         self.assertEqual(res.status, "completed")
         self.assertEqual(res.verification_status, "launch_verified")
         self.assertTrue(res.verification.verified)

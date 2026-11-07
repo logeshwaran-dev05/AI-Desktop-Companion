@@ -1,46 +1,46 @@
-# Windows Automation — Installed Application Discovery & Safe Launch
+# Windows Automation & Universal Application Launching
 
-**Created by:** Logeshwaran D (Windows Automation — Safe Actions & Verification, JM Vertex Technologies)  
+**Created by:** Logeshwaran D (Windows Automation & Safe Execution, JM Vertex Technologies)  
 **Module:** `windows_automation`  
-**Milestone:** Complete 27–30 October 2026 Tasks (Discovery, Catalogue Resolution, Safe Launch & Verification)  
+**Milestone:** Complete Windows Automation & Universal App Launching  
 **Repository:** `https://github.com/Vinayvighnesh2008/AI-Desktop-Companion`
 
 ---
 
 ## 1. Overview & Architecture
 
-The `windows_automation` module provides an auditable, secure execution and discovery layer for Windows desktop automation. It discovers installed Windows software across trusted sources, indexes them into a safe application catalogue, and executes controlled application launches with Win32 verification and strict security policy gating.
+The `windows_automation` module provides a hardened, auditable execution and discovery layer for Windows desktop automation. It dynamically discovers installed Windows software across trusted sources, indexes them into a safe application catalogue, and executes application launches via type-specific methods with Win32 verification, diagnostics, and strict security policy gating.
 
 ```
-[ User Input / AI Planner ]
-             │
-             ▼
-   [ Application Query ]
-             │
-             ▼
-┌─────────────────────────┐
-│   ApplicationDiscoverer │  Discovers apps from Registry, Start Menu (.lnk), and built-ins.
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│   ApplicationCatalogue  │  Indexes records, resolves names/aliases/IDs, handles ambiguity.
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│   WindowsActionPolicy   │  Enforces allowlist, blocks arbitrary shell scripts, verifies auth.
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│ WindowsAutomationExecutor│ Spawns process (shell=False), tracks PID, enforces cancellation.
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│  WindowsWindowVerifier  │  Win32 EnumWindows / GetWindowThreadProcessId verification.
-└─────────────────────────┘
+[ User Input / Voice / AI Planner ]
+                 │
+                 ▼
+       [ Application Query ]
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│     ApplicationDiscoverer       │  Discovers apps from Registry, Start Menu (.lnk),
+└────────────────┬────────────────┘  App Paths, AppX aliases, and system built-ins.
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│      ApplicationCatalogue       │  Indexes records, resolves names/aliases/IDs,
+└────────────────┬────────────────┘  handles whitespace, and detects ambiguity.
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│       WindowsActionPolicy       │  Enforces allowlist, blocks arbitrary shell scripts,
+└────────────────┬────────────────┘  allows validated launches without manual prompt.
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│    WindowsAutomationExecutor    │  Selects launch method (EXE, shortcut, AppX),
+└────────────────┬────────────────┘  captures diagnostic failures, tracks PIDs.
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│      WindowsWindowVerifier      │  Native Win32 EnumWindows / GetWindowThreadProcessId
+└─────────────────────────────────┘  truthful window readiness verification.
 ```
 
 ---
@@ -48,58 +48,69 @@ The `windows_automation` module provides an auditable, secure execution and disc
 ## 2. Supported Discovery Sources
 
 The discovery engine (`ApplicationDiscoverer`) scans only reviewable, trusted Windows sources:
-1. **Windows System Built-ins:** Core system utilities (`Notepad`, `Calculator`, `Paint`).
+1. **Windows System Built-ins:** Core system utilities (`Notepad`, `Calculator`, `Paint`, `Task Manager`).
 2. **Current-User Start Menu Shortcuts:** `%APPDATA%\Microsoft\Windows\Start Menu\Programs` (resolved via pure Python binary `.lnk` Shell Link parsing).
 3. **All-Users Start Menu Shortcuts:** `%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs`.
-4. **Windows Registry (Installed Software):**
+4. **Windows App Paths Registry:**
+   - `HKLM\Software\Microsoft\Windows\CurrentVersion\App Paths`
+   - `HKCU\Software\Microsoft\Windows\CurrentVersion\App Paths`
+5. **Windows Uninstall Registry Keys:**
    - `HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall`
    - `HKLM\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall`
    - `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall`
+6. **WindowsApp Packaged Execution Aliases:**
+   - `%LOCALAPPDATA%\Microsoft\WindowsApps` (UWP / MSIX application aliases like Windows Terminal, Notepad modern, etc.).
 
 ---
 
-## 3. Catalogue Fields & Identifier Format
+## 3. Supported Application Types & Launch Methods
 
-Every application record (`ApplicationRecord`) contains:
-- **`app_id`**: Deterministic slug identifier (e.g. `app_google_chrome`, `app_notepad`, `app_microsoft_edge`).
-- **`display_name`**: Official human-readable application name (e.g. `"Google Chrome"`).
-- **`normalized_name`**: Normalized lowercase search string (e.g. `"google chrome"`).
-- **`executable_path`**: Validated filesystem path to target `.exe` or system binary.
-- **`source`**: Discovery origin (`"system_builtin"`, `"start_menu_user"`, `"start_menu_all_users"`, `"registry"`).
-- **`status`**: `"available"` (executable verified on disk) or `"target_missing"`.
-- **`version` / `publisher` / `icon_path`**: Optional trustworthy metadata.
-- **`aliases`**: Alternate search keywords (e.g. `["chrome", "google chrome"]`).
+| Application Type | Launch Method | Description |
+|---|---|---|
+| **Normal Executable** | `subprocess_executable` | Directly invokes target binary using `subprocess.Popen(..., shell=False)`. |
+| **Start Menu Shortcut** | `start_menu_shortcut` | Safely invokes `.lnk` shortcut target using `os.startfile` or resolved target. |
+| **App Paths Registered** | `app_paths_registry` | Resolves target binary registered in App Paths and spawns safely. |
+| **AppX / MSIX Packaged** | `appx_packaged` | Spawns registered WindowsApp execution alias or AUMID without shell piping. |
+
+*Arbitrary shell scripts (`.bat`, `.cmd`, `.ps1`, `.vbs`), directory traversal (`../`), and command chaining (`;`, `&`, `|`) are strictly rejected.*
 
 ---
 
-## 4. Target Resolution & Validation
+## 4. Name & Alias Matching Behavior
 
 The `ApplicationCatalogue.resolve(query)` method provides deterministic disambiguation:
-- **Exact Matches:** Direct match against `app_id`, `normalized_name`, or exact alias → `"resolved"`.
-- **Ambiguous Matches:** If a query matches multiple applications (e.g. "Visual Studio" matching both VS and VS Code) → `"ambiguous"` with candidate list.
-- **Missing Applications:** Query not found → `"not_found"`.
-- **Pre-Launch Validation:** Immediately before execution, the executor verifies that the target executable exists and has a permitted `.exe` extension. Prohibits scripts (`.bat`, `.cmd`, `.ps1`, `.vbs`, `.sh`) and raw shell strings.
+- **Case-Insensitive & Whitespace Normalization:** Extra spaces and case differences are collapsed and normalized (e.g. `"   CHROME   "` → `"Google Chrome"`).
+- **Exact ID Match:** Direct lookup by stable identifier (`app_id`).
+- **Display Name Match:** Direct lookup by normalized display name.
+- **Exact Alias Match:** Keywords like `"calc"`, `"text editor"`, `"web browser"`.
+- **Partial / Prefix Matching:** Safely resolves single candidates; detects when multiple candidates match (e.g. `"vs"` matching both Visual Studio and VS Code).
+- **Ambiguity Detection:** Returns status `"ambiguous"` with the list of candidates rather than guessing.
 
 ---
 
-## 5. Security & Permission Enforcement
-
-1. **Authorization Gate:** An action cannot execute without an `AuthorizationDecision` having `permission_status="granted"`.
-2. **Approval Enforcement:** If `requires_user_approval=True`, a valid `approval_reference` must be provided.
-3. **No Shell Invocations:** All executions use `subprocess.Popen(..., shell=False)` without elevated admin privileges.
-4. **Idempotency & Duplicate Prevention:** Identical requests within a task lifecycle are deduplicated (`ERR_DUPLICATE_REQUEST`).
-5. **Pre & Post-Launch Cancellation:** Cancelling an action terminates the spawned process (including child app alias PIDs) and confirms termination.
-
----
-
-## 6. Truthful Launch Verification
+## 5. Launch Verification Strategy
 
 The `WindowsWindowVerifier` verifies execution outcomes using native Windows Win32 APIs (`EnumWindows`, `GetWindowThreadProcessId`, `IsWindowVisible`, `GetWindowTextW`, `GetClassNameW` via `ctypes`):
 - **`launch_verified`:** Process is running AND top-level GUI window handle (`HWND`) confirmed visible.
-- **`verification_inconclusive`:** Process running, but window not detected within deadline.
+- **`launch_accepted`:** Launch command accepted and executed.
+- **`verification_inconclusive`:** Process running, but window not detected within deadline (e.g. background utility).
 - **`timed_out`:** Verification deadline expired and process terminated.
 - **`launch_failed`:** Process exited or crashed immediately after launch.
 - **`cancelled` / `denied`:** Aborted at authorization or cancellation checkpoint.
+
+---
+
+## 6. Diagnostic Information on Failure
+
+For every launch failure, `DiagnosticRecord` captures:
+- `requested_target`: Input target name.
+- `resolved_app_id`: Canonical application ID.
+- `discovery_source`: Source where the app was found.
+- `launch_method`: Launch method chosen.
+- `target_validation_passed`: Boolean validation flag.
+- `failing_stage`: `"validation"`, `"authorization"`, `"target_resolution"`, `"launch_spawn"`, or `"verification"`.
+- `exception_details`: Cleaned error message (sensitive tokens redacted).
+- `verification_summary`: Output details from the window verifier.
 
 ---
 
@@ -113,35 +124,31 @@ The `WindowsWindowVerifier` verifies execution outcomes using native Windows Win
 
 ## 8. Test Execution & Coverage
 
-### Run All 25 Tests (Mocked & Live)
+### Run All 21 Tests (Mocked & Live)
 ```powershell
 python -m unittest discover -s windows_automation/tests
 ```
 
-### Run Mocked Unit Tests (19 Tests)
+### Run Mocked Unit Tests (15 Tests)
 ```powershell
 python -m unittest -v windows_automation/tests/test_windows_automation_mocked.py
 ```
 Covers:
-1. Discovery across sources.
-2. Duplicate entry handling.
-3. Inaccessible/missing discovery directories.
-4. Empty catalogue vs failure.
-5. Valid target resolution.
-6. Ambiguous and missing target resolution.
-7. Controlled launch.
-8. Launch failure handling.
-9. Permission denied.
-10. Missing approval.
-11. Pre-launch cancellation.
-12. Post-launch cancellation.
-13. Duplicate request deduplication.
-14. Timeout handling.
-15. Verification success.
-16. Verification failure/inconclusive evidence.
-17. Rejection of arbitrary shell commands.
-18. Audit log credential redaction.
-19. Regression tests for existing AI Planner PlanStep.
+1. Application discovery across sources.
+2. Duplicate applications handling.
+3. Missing applications.
+4. Invalid targets & script extensions.
+5. Normal EXE launch.
+6. Start Menu shortcut launch.
+7. Packaged application launch (AppX / Execution Alias).
+8. Alias matching and whitespace handling.
+9. Ambiguous application names.
+10. Launch failures & diagnostics.
+11. Verification success and failure / timeout.
+12. Permission and safety behavior.
+13. Repeated requests / idempotency deduplication.
+14. Existing typed-command regression (Notepad).
+15. Integration with the existing workflow (Booviha's PlanStep adapter).
 
 ### Run Live Windows Integration Tests (6 Tests)
 ```powershell
@@ -153,4 +160,4 @@ Covers:
 3. Real Notepad launch and Win32 window detection.
 4. Controlled launch via catalogue record.
 5. Rejection of dangerous shell command targets.
-6. End-to-end integration with Booviha's `ai_engine.schemas.command_schema.PlanStep`.
+6. End-to-end integration with Booviha's `PlanStep`.

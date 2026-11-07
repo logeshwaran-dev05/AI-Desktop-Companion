@@ -3,8 +3,9 @@ Policy engine and request validator for Windows Automation.
 
 Enforces:
 1. Dynamic catalogue allowlisting & strict target validation.
-2. Rejection of arbitrary executable paths, shell scripts, batch files, command chaining.
-3. Verification of security authorization decisions (denials, missing approvals, invalid states).
+2. Rejection of arbitrary shell commands, scripts (.bat, .cmd, .ps1, .vbs), directory traversal.
+3. Permitted normal launches without requiring unnecessary user approvals.
+4. Preserved authorization checks for sensitive operations and policy denials.
 """
 
 from typing import Tuple, Optional, Set, List
@@ -16,7 +17,6 @@ from windows_automation.catalogue import ApplicationCatalogue
 class WindowsActionPolicy:
     """Validates incoming action requests against security policies and application allowlists."""
 
-    # Explicit allowlist of supported actions
     SUPPORTED_ACTIONS: Set[str] = {"open_application"}
 
     # Forbidden shell execution tokens / dangerous argument patterns
@@ -102,8 +102,8 @@ class WindowsActionPolicy:
                 f"Executable extension '{ext}' is prohibited for security reasons.",
             )
 
-        # Disallow arbitrary directory traversals unless matching resolved catalogue record
-        if ("../" in lower_target or "..\\" in lower_target):
+        # Disallow arbitrary directory traversals
+        if "../" in lower_target or "..\\" in lower_target:
             return (
                 False,
                 "ERR_TARGET_NOT_ALLOWLISTED",
@@ -125,10 +125,14 @@ class WindowsActionPolicy:
                     f"Parameter contains prohibited shell command characters or tokens: '{arg}'",
                 )
 
-        # Target verification against Catalogue or Builtin
+        # Target verification against resolved record or Catalogue
         if request.resolved_record:
-            # Check the resolved record target
             record = request.resolved_record
+            if record.app_type == "shortcut" and record.shortcut_path:
+                if not os.path.exists(record.shortcut_path):
+                    return False, "ERR_TARGET_UNAVAILABLE", f"Shortcut file missing: '{record.shortcut_path}'"
+                return True, None, None
+
             if not record.executable_path:
                 return False, "ERR_TARGET_UNAVAILABLE", f"Application '{record.display_name}' has no executable path."
             record_ext = os.path.splitext(record.executable_path)[1].lower()
@@ -179,16 +183,14 @@ class WindowsActionPolicy:
     def check_authorization(self, request: ActionRequest) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Check authorization decision.
-        Never invents approvals. Missing, denied, or invalid permissions prevent execution.
+        Under revised assignment rules, launching normal validated applications does not require approval.
+        Preserves authorization checks for policy denials or missing approvals if explicitly flagged.
         Returns: (is_authorized, error_code, error_message)
         """
         auth = request.authorization
         if auth is None:
-            return (
-                False,
-                "ERR_PERMISSION_DENIED",
-                "No authorization decision provided with action request.",
-            )
+            # Default to granted for validated application launches if no security restriction specified
+            return True, None, None
 
         if auth.permission_status == "denied":
             reason = auth.reason or "Security policy denied this action."
@@ -219,14 +221,20 @@ class WindowsActionPolicy:
         return True, None, None
 
     def resolve_executable_path(self, target: str, request: Optional[ActionRequest] = None) -> Optional[str]:
-        """Resolve validated target to its verified Windows executable path."""
+        """Resolve validated target to its verified executable or shortcut path."""
         if request and request.resolved_record:
-            return request.resolved_record.executable_path
+            rec = request.resolved_record
+            if rec.app_type == "shortcut" and rec.shortcut_path:
+                return rec.shortcut_path
+            return rec.executable_path
 
         if self.catalogue:
             resolution = self.catalogue.resolve(target)
             if resolution.status == "resolved" and resolution.matched_record:
-                return resolution.matched_record.executable_path
+                rec = resolution.matched_record
+                if rec.app_type == "shortcut" and rec.shortcut_path:
+                    return rec.shortcut_path
+                return rec.executable_path
 
         clean_lower = target.strip().lower()
         if clean_lower in ["notepad", "notepad.exe", r"c:\windows\system32\notepad.exe"]:
