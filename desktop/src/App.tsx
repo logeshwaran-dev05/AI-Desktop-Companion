@@ -12,7 +12,7 @@ type AvatarState =
   | 'Success'
   | 'Warning'
   | 'Error'
-type TaskStatus = 'Pending' | 'Stopped'
+type TaskStatus = 'Pending' | 'Running' | 'Completed' | 'Failed' | 'Stopped'
 type Task = {
   id: number
   title: string
@@ -89,7 +89,7 @@ function App() {
     }
   }, [viewMode])
 
-  const activeTasks = tasks.filter((task) => task.status === 'Pending')
+  const activeTasks = tasks.filter((task) => task.status === 'Pending' || task.status === 'Running')
   const currentAvatarState = isSleeping ? 'Idle' : avatarState
   const companionStyle: CSSProperties = floatingPosition
     ? { position: 'fixed', left: `${floatingPosition.x}px`, top: `${floatingPosition.y}px`, right: 'auto', bottom: 'auto' }
@@ -101,30 +101,81 @@ function App() {
         top: 'auto',
       }
 
-  function sendMessage() {
+  async function sendMessage() {
     const text = message.trim()
     if (!text || isSleeping) return
 
     const now = new Date()
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const taskId = Date.now()
+    const compMsgId = taskId + 1
+
     setMessages((previous) => [
       ...previous,
-      { id: Date.now(), author: 'You', text, time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
-      {
-        id: Date.now() + 1,
-        author: 'Companion',
-        text: 'Request saved in this local preview. No AI planning or computer action was performed.',
-        time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      },
+      { id: taskId, author: 'You', text, time: timeStr },
     ])
-    setTasks((previous) => [...previous, { id: Date.now(), title: text, status: 'Pending' }])
+    setTasks((previous) => [...previous, { id: taskId, title: text, status: 'Running' }])
     setMessage('')
-    setAvatarState('Idle')
-    setNotice('Request added to the local preview.')
+    setAvatarState('Thinking')
+    setNotice('Companion is processing your request...')
+
+    try {
+      const response = await fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: text }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Server returned HTTP ${response.status}`)
+      }
+
+      const data = await response.json()
+      const replyText = data.reply || 'Action completed.'
+      const newAvatarState: AvatarState = data.avatar_state && avatarStates.includes(data.avatar_state as AvatarState)
+        ? (data.avatar_state as AvatarState)
+        : (data.status === 'success' ? 'Success' : 'Idle')
+
+      setMessages((previous) => [
+        ...previous,
+        { id: compMsgId, author: 'Companion', text: replyText, time: timeStr },
+      ])
+
+      setTasks((previous) =>
+        previous.map((t) =>
+          t.id === taskId
+            ? { ...t, status: data.status === 'success' ? 'Completed' : (data.status === 'failed' ? 'Failed' : 'Completed') }
+            : t
+        )
+      )
+
+      setAvatarState(newAvatarState)
+      setNotice(data.status === 'success' ? `Task completed: ${replyText}` : replyText)
+
+      if (newAvatarState === 'Success') {
+        setTimeout(() => setAvatarState('Idle'), 4000)
+      }
+    } catch {
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: compMsgId,
+          author: 'Companion',
+          text: 'Request saved in this local preview. (Companion API offline)',
+          time: timeStr,
+        },
+      ])
+      setTasks((previous) =>
+        previous.map((t) => (t.id === taskId ? { ...t, status: 'Pending' } : t))
+      )
+      setAvatarState('Idle')
+      setNotice('Request added to local preview.')
+    }
   }
 
   function stopTasks() {
     setTasks((previous) =>
-      previous.map((task) => (task.status === 'Pending' ? { ...task, status: 'Stopped' } : task)),
+      previous.map((task) => (task.status === 'Pending' || task.status === 'Running' ? { ...task, status: 'Stopped' } : task)),
     )
     setIsPaused(false)
     setNotice(activeTasks.length ? 'Pending preview requests stopped.' : 'There are no pending requests to stop.')
@@ -555,7 +606,7 @@ function App() {
                       </button>
                     </div>
                   </form>
-                  <p className="privacy-note">Local preview only. No microphone, AI, or computer access is active.</p>
+                  <p className="privacy-note">Connected to Windows Automation Companion engine.</p>
                 </div>
               </div>
             </section>
