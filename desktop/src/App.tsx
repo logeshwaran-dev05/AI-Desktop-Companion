@@ -506,6 +506,7 @@ function App() {
     } else {
       // Browser preview mode -> forward to local dev server backend
       const candidateUrls = [
+        `http://127.0.0.1:8000/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,
         `/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,
         `http://127.0.0.1:5173/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,
         `http://localhost:5173/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,

@@ -12,6 +12,7 @@
  */
 
 const { exec } = require('child_process');
+const http = require('http');
 
 const APP_ALLOWLIST = [
   {
@@ -57,6 +58,34 @@ const APP_ALLOWLIST = [
  * @param {string[]} processNames
  * @returns {Promise<boolean>}
  */
+
+/**
+ * Query Python Universal Automation Engine (supports all 260+ Win32, Win64, UWP, MSIX applications)
+ * @param {string} appId
+ * @returns {Promise<any>}
+ */
+function queryPythonBackend(appId) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:8000/api/launch-app?appId=${encodeURIComponent(appId)}`, { timeout: 3500 }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
 function verifyProcessRunning(processNames) {
   return new Promise((resolve) => {
     exec('tasklist /fo csv /nh', { windowsHide: true }, (err, stdout) => {
@@ -84,9 +113,36 @@ function verifyProcessRunning(processNames) {
  * }>}
  */
 function launchApp(appId) {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     const normalizedId = (appId || '').trim().toLowerCase();
 
+    // 1. First delegate to Universal Python Automation Engine (Win32, Win64, UWP/MSIX, StartApps)
+    const pyResult = await queryPythonBackend(normalizedId);
+    if (pyResult && (pyResult.success || pyResult.verified)) {
+      console.log(`[Launcher] Universal launcher executed and verified: ${pyResult.displayName}`);
+      resolve({
+        success: true,
+        verified: !!pyResult.verified,
+        displayName: pyResult.displayName || appId,
+        mode: 'real',
+      });
+      return;
+    } else if (pyResult && pyResult.error && !pyResult.error.includes('ECONNREFUSED')) {
+      console.warn(`[Launcher] Universal launcher reported error: ${pyResult.error}`);
+      // If backend explicitly found the app or failed launch, return truthful result
+      if (pyResult.mode === 'real') {
+        resolve({
+          success: false,
+          verified: false,
+          displayName: pyResult.displayName || appId,
+          mode: 'real',
+          error: pyResult.error,
+        });
+        return;
+      }
+    }
+
+    // 2. Fallback to local allowlist if backend is unavailable or app is built-in
     const appEntry = APP_ALLOWLIST.find((a) => a.id === normalizedId);
 
     if (!appEntry) {
@@ -95,7 +151,7 @@ function launchApp(appId) {
         verified: false,
         displayName: appId,
         mode: 'not-found',
-        error: `"${appId}" is not in the allowed application list. Permitted: ${APP_ALLOWLIST.map((a) => a.id).join(', ')}.`,
+        error: pyResult?.error || `"${appId}" was not found in installed applications or local registry.`,
       });
       return;
     }

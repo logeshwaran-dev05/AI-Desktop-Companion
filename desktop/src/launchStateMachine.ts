@@ -216,6 +216,17 @@ export function resolveAppIntent(text: string): { appId: string; displayName: st
       return { appId: clean.toLowerCase(), displayName: clean }
     }
   }
+
+  // Universal dynamic fallback for standalone application name (e.g. "Photoshop", "Word", "Spotify")
+  const singleApp = text.replace(/^[!.\s]+|[!.\s]+$/g, '').trim()
+  if (
+    singleApp &&
+    singleApp.split(/\s+/).length <= 4 &&
+    !/^(hello|hi|hey|how|what|who|where|when|why|thanks|thank you|cancel|stop|help|clear)\b/i.test(singleApp)
+  ) {
+    return { appId: singleApp.toLowerCase(), displayName: singleApp }
+  }
+
   return null
 }
 
