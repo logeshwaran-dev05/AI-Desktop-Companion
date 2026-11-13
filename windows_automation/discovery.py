@@ -266,8 +266,8 @@ class ApplicationDiscoverer:
 
                 full_path = os.path.join(root, file_name)
                 base_lower = file_name.lower()
-                # Exclude obvious uninstaller / updater / doc shortcuts
-                if any(k in base_lower for k in ["uninstall", "remove", "help", "readme", "documentation", "manual"]):
+                # Exclude obvious uninstaller / updater / doc / troubleshooting shortcuts
+                if any(k in base_lower for k in ["uninstall", "remove", "help", "readme", "documentation", "manual", "reset preferences", "cache files"]):
                     continue
 
                 target = parse_lnk_file(full_path)
@@ -275,11 +275,15 @@ class ApplicationDiscoverer:
                 norm_name = normalize_app_name(clean_name)
                 app_id = generate_stable_app_id(clean_name)
 
+                GENERIC_PREFIXES = {"microsoft", "adobe", "google", "apple", "oracle", "mozilla", "windows"}
+                GENERIC_SUFFIXES = {"2010", "2013", "2016", "2019", "2021", "2024", "2025", "pro", "plus", "free", "edition", "x64", "x86", "64", "32", "app", "desktop"}
+
                 aliases = [norm_name]
                 words = norm_name.split()
-                if len(words) > 1:
-                    aliases.append(words[0])
-                    aliases.append(words[-1])
+                for w in words:
+                    if w not in GENERIC_PREFIXES and w not in GENERIC_SUFFIXES and len(w) >= 3:
+                        if w not in aliases:
+                            aliases.append(w)
 
                 # Target may be an EXE or a shell link to an AUMID
                 if target and target.lower().endswith(".exe"):
@@ -289,7 +293,15 @@ class ApplicationDiscoverer:
                         for al in aliases:
                             if al not in existing.aliases:
                                 existing.aliases.append(al)
-                        if not existing.shortcut_path:
+                        # Prefer clean primary shortcut name over auxiliary names
+                        is_aux = any(k in existing.display_name.lower() for k in ["reset", "cache", "preferences", "skinned", "safe mode"])
+                        new_clean = not any(k in clean_name.lower() for k in ["reset", "cache", "preferences", "skinned", "safe mode"])
+                        if (is_aux and new_clean) or (new_clean and len(clean_name) < len(existing.display_name)):
+                            existing.display_name = clean_name
+                            existing.normalized_name = norm_name
+                            existing.app_id = app_id
+                            existing.shortcut_path = full_path
+                        elif not existing.shortcut_path:
                             existing.shortcut_path = full_path
                     else:
                         rec = ApplicationRecord(
@@ -541,18 +553,23 @@ class ApplicationDiscoverer:
             "calculator": ["calc", "calculator"],
             "google chrome": ["chrome", "google chrome", "browser", "my browser"],
             "visual studio code": ["vs code", "vscode", "code"],
-            "adobe photoshop 2025": ["photoshop", "adobe photoshop", "ps"],
+            "adobe photoshop": ["photoshop", "adobe photoshop", "ps"],
             "spotify": ["spotify", "music", "spotify music"],
             "settings": ["settings", "windows settings", "pc settings"],
             "word": ["word", "ms word", "microsoft word"],
             "excel": ["excel", "ms excel", "microsoft excel"],
             "powerpoint": ["powerpoint", "ppt", "ms powerpoint"],
+            "vlc": ["vlc", "vlc media player"],
+            "notepad": ["notepad", "text editor"],
         }
 
         for item in items:
             name = item.get("Name")
             aid = item.get("AppID")
             if not name or not aid:
+                continue
+            # Skip auxiliary troubleshooting or cache reset shortcuts
+            if any(k in name.lower() for k in ["reset preferences", "cache files", "help and support"]):
                 continue
 
             app_id = generate_stable_app_id(name)
@@ -564,7 +581,7 @@ class ApplicationDiscoverer:
             lower_name = name.lower()
 
             for target_k, smart_list in COMMON_SMART_ALIASES.items():
-                if target_k == lower_name or (len(target_k) > 4 and target_k in lower_name):
+                if target_k == lower_name or (len(target_k) >= 4 and target_k in lower_name):
                     aliases.extend(smart_list)
 
             # Clean duplicate aliases

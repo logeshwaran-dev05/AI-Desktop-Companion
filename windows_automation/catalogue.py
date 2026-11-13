@@ -103,6 +103,17 @@ class ApplicationCatalogue:
                 if len(starts_with_query) == 1:
                     return self._validate_and_return_match(norm_query, starts_with_query[0], verify_existence=verify_existence)
 
+                # Deduplicate candidates pointing to the same binary executable
+                all_have_exe = all(bool(m.executable_path and m.executable_path.lower().endswith(".exe")) for m in unique_matches)
+                unique_binaries = {
+                    os.path.basename(m.executable_path).lower()
+                    for m in unique_matches
+                    if m.executable_path and os.path.basename(m.executable_path).lower().endswith(".exe")
+                }
+                if all_have_exe and len(unique_binaries) == 1:
+                    preferred = [m for m in unique_matches if m.source in ("start_apps", "start_menu_user", "start_menu_all_users")]
+                    return self._validate_and_return_match(norm_query, preferred[0] if preferred else unique_matches[0], verify_existence=verify_existence)
+
                 return ResolutionResult(
                     status="ambiguous",
                     query=clean_query,
@@ -143,6 +154,25 @@ class ApplicationCatalogue:
             display_prefixes = [c for c in candidates if c.display_name.lower().startswith(clean_query.lower())]
             if len(display_prefixes) == 1:
                 return self._validate_and_return_match(norm_query, display_prefixes[0], verify_existence=verify_existence)
+
+            # Deduplicate candidates pointing to the same binary executable
+            all_have_exe = all(bool(c.executable_path and c.executable_path.lower().endswith(".exe")) for c in candidates)
+            unique_binaries = {
+                os.path.basename(c.executable_path).lower()
+                for c in candidates
+                if c.executable_path and os.path.basename(c.executable_path).lower().endswith(".exe")
+            }
+            if all_have_exe and len(unique_binaries) == 1:
+                preferred = [c for c in candidates if c.source in ("start_apps", "start_menu_user", "start_menu_all_users")]
+                return self._validate_and_return_match(norm_query, preferred[0] if preferred else candidates[0], verify_existence=verify_existence)
+
+            # Exclude auxiliary troubleshooting shortcuts if a clean primary candidate exists
+            clean_candidates = [
+                c for c in candidates
+                if not any(k in c.display_name.lower() for k in ("reset preferences", "cache files", "skinned", "safe mode", "uninstall"))
+            ]
+            if len(clean_candidates) == 1:
+                return self._validate_and_return_match(norm_query, clean_candidates[0], verify_existence=verify_existence)
 
             return ResolutionResult(
                 status="ambiguous",
