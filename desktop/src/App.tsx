@@ -27,6 +27,7 @@ type AvatarState =
   | 'Thinking'
   | 'Working'
   | 'Approval Required'
+  | 'Greeting'
   | 'Success'
   | 'Warning'
   | 'Error'
@@ -62,16 +63,25 @@ const navigation: { label: Page; icon: string }[] = [
   { label: 'Settings', icon: '⚙' },
 ]
 
+const GREETINGS = [
+  "Hey! What shall we do today? 😊",
+  "Hello! Need a little help? 🌟",
+  "Hi there! Ready to explore? 🚀",
+  "Hey! I'm here. What's on your mind? 💭",
+]
+
 /** Map the high-level AvatarState to an animation state for Doraemon */
 function toAnimState(
-  avatarState: AvatarState,
+  avatarState: AvatarState | string,
   isSleeping: boolean,
   launchState: LaunchState,
-  isVoiceRecording: boolean
+  isVoiceRecording: boolean,
+  isInTransit: boolean = false,
+  _showGreeting: boolean = false
 ): AvatarAnimState {
   if (isSleeping) return 'idle'
   if (isVoiceRecording) return 'listening'
-  if (launchState === 'running' || launchState === 'launching') return 'running'
+  if (isInTransit || launchState === 'running' || launchState === 'launching') return 'walking'
   if (launchState === 'resolving' || launchState === 'planning') return 'thinking'
   if (launchState === 'success') return 'success'
   if (launchState === 'error' || launchState === 'failed' || launchState === 'not-allowed' || launchState === 'not-in-electron') return 'error'
@@ -80,6 +90,7 @@ function toAnimState(
     case 'Listening':          return 'listening'
     case 'Thinking':           return 'thinking'
     case 'Working':            return 'thinking'
+    case 'Greeting':           return 'idle'
     case 'Approval Required':  return 'waiting'
     case 'Success':            return 'success'
     case 'Warning':            return 'waiting'
@@ -135,7 +146,7 @@ function LaunchBanner({ result, onCancel }: { result: LaunchResult; onCancel?: (
             </span>
           )}
         </div>
-        {body && <span>{body}</span>}
+        {body && <div style={{ fontSize: 12, lineHeight: 1.45, wordBreak: 'break-word', marginTop: 2 }}>{body}</div>}
         {stateKey === 'launching' && onCancel && (
           <div>
             <button type="button" className="cancel-move-btn" onClick={onCancel}>
@@ -197,17 +208,19 @@ function App() {
   const [tasks, setTasks]               = useState<Task[]>([])
   const [activePage, setActivePage]     = useState<Page>('Companion')
   const [avatarState, setAvatarState]   = useState<AvatarState>('Idle')
-  const [isPaused, setIsPaused]         = useState(false)
+  const [_isPaused, setIsPaused]        = useState(false)
   const [isSleeping, setIsSleeping]     = useState(false)
-  const [isAssistantPanelOpen, setIsAssistantPanelOpen] = useState(true)
+  const [_isAssistantPanelOpen, _setIsAssistantPanelOpen] = useState(true)
   const [isStartMenuOpen, setIsStartMenuOpen] = useState(false)
   const [desktopSearch, setDesktopSearch] = useState('')
-  const [isWindowOpen, setIsWindowOpen] = useState(true)
-  const [isWindowMaximized, setIsWindowMaximized] = useState(false)
+  const [isWindowOpen, setIsWindowOpen] = useState(false)
+  const [_isWindowMaximized, _setIsWindowMaximized] = useState(false)
   const [notice, setNotice]             = useState('')
   const [floatingPosition, setFloatingPosition] = useState<{ x: number; y: number } | null>(null)
-  const [windowPosition, setWindowPosition]     = useState<{ x: number; y: number } | null>(null)
+  const [_windowPosition, _setWindowPosition]     = useState<{ x: number; y: number } | null>(null)
   const [currentTime, setCurrentTime]           = useState(() => new Date())
+  const [showGreeting, setShowGreeting] = useState(false)
+  const [greetingText, setGreetingText] = useState('')
 
   // ── Voice interaction state ─────────────────────────────────────────────────
   const [isVoiceRecording, setIsVoiceRecording] = useState(false)
@@ -215,20 +228,29 @@ function App() {
   const [audioLevel, setAudioLevel]             = useState(0)
   const [voiceError, setVoiceError]             = useState<string | null>(null)
 
+  // ── Voice Testing & Diagnostic state ────────────────────────────────────────
+  const [isTestingMic, setIsTestingMic]                 = useState(false)
+  const [micTestLevel, setMicTestLevel]                 = useState(0)
+  const [micTestMsg, setMicTestMsg]                     = useState('')
+  const [isTestingSpeech, setIsTestingSpeech]           = useState(false)
+  const [speechTestTranscript, setSpeechTestTranscript] = useState('')
+  const [isTestingTTS, setIsTestingTTS]                 = useState(false)
+  const micTestCleanupRef                               = useRef<(() => void) | null>(null)
+
   // ── Live task progress for Mission Control ──────────────────────────────────
   const [liveProgress, setLiveProgress]         = useState<LiveTaskProgress | null>(null)
   const taskCancelledRef                        = useRef<boolean>(false)
 
   // ── Launch & movement state ─────────────────────────────────────────────────
   const [launchState, setLaunchState]   = useState<LaunchState>('idle')
-  const [currentLaunchResult, setCurrentLaunchResult] = useState<LaunchResult | null>(null)
+  const [_currentLaunchResult, setCurrentLaunchResult] = useState<LaunchResult | null>(null)
   const [facing, setFacing]             = useState<'left' | 'right'>('right')
   const [executionMode, setExecutionMode] = useState<'real' | 'mock'>('real')
+  const [isInTransit, setIsInTransit]   = useState(false)
   const [isDragging, setIsDragging]     = useState(false)
 
-  const dragOrigin      = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
-  const avatarDragStart = useRef<{ x: number; y: number } | null>(null)
-  const windowDragStart = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number } | null>(null)
+  const dragOrigin      = useRef<{ startX: number; startY: number; left: number; top: number; moved: boolean } | null>(null)
+  const avatarDragStart = useRef<{ screenX: number; screenY: number; moved: boolean } | null>(null)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
   const voiceAutoEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestSpeechRef = useRef<string>('')
@@ -246,11 +268,15 @@ function App() {
     return () => clearInterval(timer)
   }, [])
 
-  // Clean up any ongoing voice listening session on unmount
+  // Clean up any ongoing voice listening session or mic test on unmount
   useEffect(() => {
     return () => {
       clearVoiceAutoEndTimer()
       voiceService.stopListening()
+      if (micTestCleanupRef.current) {
+        micTestCleanupRef.current()
+        micTestCleanupRef.current = null
+      }
     }
   }, [clearVoiceAutoEndTimer])
 
@@ -275,6 +301,9 @@ function App() {
         if (data.facing) {
           setFacing(data.facing)
         }
+        if (typeof data.isMoving === 'boolean') {
+          setIsInTransit(data.isMoving)
+        }
         if (data.taskState) {
           setLaunchState(data.taskState as LaunchState)
         }
@@ -295,32 +324,7 @@ function App() {
     }
   }, [viewMode])
 
-  // ── Window drag handlers ────────────────────────────────────────────────────
-  function beginWindowDrag(e: PointerEvent<HTMLDivElement>) {
-    if (isWindowMaximized) return
-    if ((e.target as HTMLElement).closest('button, input, select, textarea, a')) return
-    const frame = (e.currentTarget.parentElement as HTMLElement)?.getBoundingClientRect()
-    const startX = windowPosition?.x ?? frame?.left ?? 100
-    const startY = windowPosition?.y ?? frame?.top ?? 40
-    windowDragStart.current = { mouseX: e.clientX, mouseY: e.clientY, startX, startY }
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* ok */ }
-  }
 
-  function moveWindowDrag(e: PointerEvent<HTMLDivElement>) {
-    if (!windowDragStart.current) return
-    const dx = e.clientX - windowDragStart.current.mouseX
-    const dy = e.clientY - windowDragStart.current.mouseY
-    const newX = Math.max(10, Math.min(window.innerWidth - 300, windowDragStart.current.startX + dx))
-    const newY = Math.max(0, Math.min(window.innerHeight - 100, windowDragStart.current.startY + dy))
-    setWindowPosition({ x: newX, y: newY })
-  }
-
-  function endWindowDrag(e: PointerEvent<HTMLDivElement>) {
-    if (windowDragStart.current) {
-      try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId) } catch { /* ok */ }
-      windowDragStart.current = null
-    }
-  }
 
   // ── Cancellation Handler ────────────────────────────────────────────────────
   const cancelActiveTask = useCallback(() => {
@@ -404,6 +408,9 @@ function App() {
     setMessage('')
     setVoiceTranscript('')
     latestSpeechRef.current = ''
+    if (messageInputRef.current) {
+      messageInputRef.current.style.height = '42px'
+    }
 
     const now = new Date()
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -472,11 +479,12 @@ function App() {
     if (taskCancelledRef.current) return
     updateProgressStage('waiting_execution', 'completed', 'Companion positioned. Motion trajectory generated.', 75)
 
-    // Stage 5: Launch attempted (traveling across Windows desktop)
+    // Stage 5: Launch attempted (physically traveling across Windows desktop)
     setLaunchState('launching')
     setAvatarState('Working')
-    setFacing('left')
     const targetCoord = DESKTOP_SHORTCUT_TARGETS[intent.appId] || { x: 30, y: 185 }
+    const currentX = floatingPosition?.x ?? (typeof window !== 'undefined' ? window.innerWidth - 380 : 800)
+    setFacing(targetCoord.x < currentX ? 'left' : 'right')
     setFloatingPosition(targetCoord)
     updateProgressStage('launch_attempted', 'in_progress', `Doraemon physically moving across desktop to ${intent.displayName}…`, 85)
 
@@ -668,7 +676,7 @@ function App() {
         setFloatingPosition(null)
       }, 4500)
     }
-  }, [executionMode, updateProgressStage])
+  }, [executionMode, floatingPosition, updateProgressStage])
 
   // ── Voice Input Handler with Automatic Turn-Off ─────────────────────────────
   const handleToggleVoice = useCallback(async () => {
@@ -690,6 +698,7 @@ function App() {
     latestSpeechRef.current = ''
     setVoiceError(null)
     setVoiceTranscript('')
+    setMessage('')
     setIsVoiceRecording(true)
     setAvatarState('Listening')
 
@@ -731,9 +740,8 @@ function App() {
       onError: (err) => {
         clearVoiceAutoEndTimer()
         if (err.type === 'network') {
-          // Web speech network error is expected in Electron because Google blocks Chromium apps.
-          // Fallback to Windows Voice Typing (Win + H) notice and maintain listening state.
-          setNotice('🎤 Windows Voice Typing active (Win + H). Speak into the prompt or type commands.')
+          // Keep recording mode active with live visualizer
+          setNotice('🎤 Microphone listening... Speak your command.')
           setAvatarState('Listening')
         } else {
           setVoiceError(err.message)
@@ -742,6 +750,7 @@ function App() {
         }
       },
       onEnd: () => {
+        if (window.companionAPI?.isElectron) return
         clearVoiceAutoEndTimer()
         setIsVoiceRecording(false)
         setAudioLevel(0)
@@ -762,15 +771,131 @@ function App() {
     }
   }, [clearVoiceAutoEndTimer, handleLaunchApp, isVoiceRecording, launchState])
 
+  // ── Voice Simulation & Diagnostic Testing Handlers ──────────────────────────
+  const handleSimulatedVoiceTest = useCallback(async (commandText: string) => {
+    clearVoiceAutoEndTimer()
+    if (isTestingMic && micTestCleanupRef.current) {
+      micTestCleanupRef.current()
+      micTestCleanupRef.current = null
+      setIsTestingMic(false)
+    }
+    setVoiceError(null)
+    setVoiceTranscript('')
+    setIsVoiceRecording(true)
+    setAvatarState('Listening')
+    if (messageInputRef.current) {
+      messageInputRef.current.focus()
+    }
+
+    await voiceService.simulateVoiceCommand(commandText, {
+      onTranscript: (text, isFinal) => {
+        setVoiceTranscript(text)
+        setMessage(text)
+        latestSpeechRef.current = text
+        if (isFinal) {
+          setIsVoiceRecording(false)
+          setAudioLevel(0)
+          setAvatarState('Thinking')
+          handleLaunchApp(text)
+        }
+      },
+      onAudioLevel: (level) => {
+        setAudioLevel(level)
+      },
+      onError: (err) => {
+        setVoiceError(err.message)
+        setIsVoiceRecording(false)
+        setAudioLevel(0)
+        setAvatarState('Error')
+      },
+      onEnd: () => {
+        setIsVoiceRecording(false)
+        setAudioLevel(0)
+      },
+    })
+  }, [clearVoiceAutoEndTimer, handleLaunchApp, isTestingMic])
+
+  const toggleMicTest = useCallback(async () => {
+    if (isTestingMic) {
+      if (micTestCleanupRef.current) {
+        micTestCleanupRef.current()
+        micTestCleanupRef.current = null
+      }
+      setIsTestingMic(false)
+      setMicTestLevel(0)
+      setMicTestMsg('Microphone hardware test stopped.')
+    } else {
+      try {
+        setIsTestingMic(true)
+        setMicTestMsg('Listening... Speak into your microphone to verify input level.')
+        const cleanup = await voiceService.testMicrophone((level) => {
+          setMicTestLevel(level)
+          if (level > 15) {
+            setMicTestMsg(`Audio Signal Detected! Level: ${level}%`)
+          }
+        })
+        micTestCleanupRef.current = cleanup
+      } catch (err: unknown) {
+        setIsTestingMic(false)
+        setMicTestMsg(`Microphone unavailable: ${err instanceof Error ? err.message : 'Permission denied or device not found'}`)
+      }
+    }
+  }, [isTestingMic])
+
+  const toggleSpeechTest = useCallback(async () => {
+    if (isTestingSpeech) {
+      voiceService.stopListening()
+      setIsTestingSpeech(false)
+    } else {
+      setIsTestingSpeech(true)
+      setSpeechTestTranscript('Listening... Speak a phrase now.')
+      const started = await voiceService.startListening({
+        onTranscript: (t, isFinal) => {
+          setSpeechTestTranscript(t)
+          if (isFinal) {
+            setTimeout(() => setIsTestingSpeech(false), 900)
+          }
+        },
+        onAudioLevel: (lvl) => setMicTestLevel(lvl),
+        onError: (err) => {
+          setSpeechTestTranscript(`Speech engine note: ${err.message}`)
+          setIsTestingSpeech(false)
+        },
+        onEnd: () => {
+          setIsTestingSpeech(false)
+        },
+      })
+      if (!started) {
+        setIsTestingSpeech(false)
+        setSpeechTestTranscript('Speech recognition unavailable. Press Win+H for Windows Voice Typing.')
+      }
+    }
+  }, [isTestingSpeech])
+
+  const handleTestTTS = useCallback(() => {
+    if (isTestingTTS) return
+    setIsTestingTTS(true)
+    voiceService.speakResponse('Hello! I am Doraemon. Your voice automation companion is ready and working!', () => {
+      setIsTestingTTS(false)
+    })
+  }, [isTestingTTS])
+
   // ── Derived avatar values ───────────────────────────────────────────────────
-  const activeTasks = tasks.filter((t) => t.status === 'Pending')
   const currentAvatarState = isSleeping ? 'Idle' : avatarState
-  const animState = toAnimState(currentAvatarState, isSleeping, launchState, isVoiceRecording)
-  const isMoving = launchState === 'launching' || launchState === 'running'
+  const animState = toAnimState(currentAvatarState, isSleeping, launchState, isVoiceRecording, isInTransit, showGreeting)
+  const isMoving = isInTransit || launchState === 'launching' || launchState === 'running'
 
   const currentPos = floatingPosition || {
-    x: typeof window !== 'undefined' ? Math.max(80, window.innerWidth - (isAssistantPanelOpen ? 460 : 200)) : 800,
-    y: typeof window !== 'undefined' ? Math.max(80, window.innerHeight - 250) : 500,
+    x: typeof window !== 'undefined'
+      ? (isWindowOpen
+          ? Math.max(20, window.innerWidth - 420 - 48 - 180 - 16)
+          : Math.max(20, window.innerWidth - 220))
+      : 800,
+    y: typeof window !== 'undefined'
+      ? (isWindowOpen
+          ? Math.max(60, window.innerHeight - 280)
+          : Math.max(60, window.innerHeight - 260))
+      : 500,
   }
 
   const companionStyle: CSSProperties = {
@@ -779,10 +904,12 @@ function App() {
     top: `${currentPos.y}px`,
     right: 'auto',
     bottom: 'auto',
-    zIndex: 9999,
+    zIndex: 9990,
     transition: isDragging
       ? 'none'
-      : 'left 2.8s cubic-bezier(0.35, 0, 0.25, 1), top 2.8s cubic-bezier(0.35, 0, 0.25, 1)',
+      : isMoving
+      ? 'left 2.8s cubic-bezier(0.35, 0, 0.25, 1), top 2.8s cubic-bezier(0.35, 0, 0.25, 1)'
+      : 'left 0.65s cubic-bezier(0.25, 1, 0.5, 1), top 0.65s cubic-bezier(0.25, 1, 0.5, 1)',
     pointerEvents: 'auto',
   }
 
@@ -797,6 +924,9 @@ function App() {
     const text = message.trim()
     if (!text || isSleeping) return
     setMessage('')
+    if (messageInputRef.current) {
+      messageInputRef.current.style.height = '42px'
+    }
 
     if (isLaunchIntent(text)) {
       handleLaunchApp(text)
@@ -821,12 +951,6 @@ function App() {
   }
 
   // ── Companion drag (browser mode) ───────────────────────────────────────────
-  function stopTasks() {
-    cancelActiveTask()
-    setTasks((prev) => prev.map((t) => t.status === 'Pending' ? { ...t, status: 'Stopped' } : t))
-    setIsPaused(false)
-    setNotice(activeTasks.length ? 'Pending preview requests stopped.' : 'There are no pending requests to stop.')
-  }
 
   function startNewConversation() {
     setMessages([])
@@ -840,33 +964,57 @@ function App() {
 
   function beginCompanionDrag(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return
-    if ((event.target as HTMLElement).closest('button, select, input, a, option')) return
-    const rect = event.currentTarget.getBoundingClientRect()
-    event.currentTarget.setPointerCapture(event.pointerId)
-    dragOrigin.current = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top }
-    setIsDragging(true)
+    if ((event.target as HTMLElement).closest('button, select, input, a, option, .no-drag-region')) return
+    dragOrigin.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      left: currentPos.x,
+      top: currentPos.y,
+      moved: false,
+    }
   }
 
   function moveCompanion(event: PointerEvent<HTMLDivElement>) {
     const origin = dragOrigin.current
     if (!origin) return
+    const dx = event.clientX - origin.startX
+    const dy = event.clientY - origin.startY
+    const dist = Math.hypot(dx, dy)
+
+    if (!origin.moved) {
+      if (dist > 5) {
+        origin.moved = true
+        setIsDragging(true)
+        try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* ok */ }
+      } else {
+        return
+      }
+    }
+
     setFloatingPosition({
-      x: Math.max(10, Math.min(window.innerWidth - 190, origin.left + event.clientX - origin.x)),
-      y: Math.max(10, Math.min(window.innerHeight - 240, origin.top + event.clientY - origin.y)),
+      x: Math.max(10, Math.min(window.innerWidth - 190, origin.left + dx)),
+      y: Math.max(10, Math.min(window.innerHeight - 240, origin.top + dy)),
     })
   }
 
   function endCompanionDrag(event: PointerEvent<HTMLDivElement>) {
-    setIsDragging(false)
-    if (dragOrigin.current) {
+    const origin = dragOrigin.current
+    if (origin) {
+      const wasMoved = origin.moved
+      setIsDragging(false)
       try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ok */ }
       dragOrigin.current = null
+
+      if (!wasMoved) {
+        // Pointer was clicked without moving -> open/toggle chatbox!
+        handleAvatarClick()
+      }
     }
   }
 
   function nudgeCompanion(event: KeyboardEvent<HTMLDivElement>) {
     const step = 20
-    const defaultX = isAssistantPanelOpen ? Math.max(12, window.innerWidth - 530) : Math.max(12, window.innerWidth - 220)
+    const defaultX = isWindowOpen ? Math.max(12, window.innerWidth - 680) : Math.max(12, window.innerWidth - 220)
     const defaultY = Math.max(12, window.innerHeight - 300)
     const left = floatingPosition?.x ?? defaultX
     const top  = floatingPosition?.y ?? defaultY
@@ -888,24 +1036,84 @@ function App() {
   function beginAvatarDrag(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return
     if ((event.target as HTMLElement).closest('button, select, input, a, option, .no-drag-region')) return
-    avatarDragStart.current = { x: event.screenX, y: event.screenY }
+    avatarDragStart.current = { screenX: event.screenX, screenY: event.screenY, moved: false }
     try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* ok */ }
   }
 
   function moveAvatarDrag(event: PointerEvent<HTMLDivElement>) {
     if (!avatarDragStart.current) return
-    const dx = event.screenX - avatarDragStart.current.x
-    const dy = event.screenY - avatarDragStart.current.y
+    const dx = event.screenX - avatarDragStart.current.screenX
+    const dy = event.screenY - avatarDragStart.current.screenY
+    if (Math.hypot(dx, dy) > 3) {
+      avatarDragStart.current.moved = true
+    }
     if (dx !== 0 || dy !== 0) {
-      avatarDragStart.current = { x: event.screenX, y: event.screenY }
+      avatarDragStart.current.screenX = event.screenX
+      avatarDragStart.current.screenY = event.screenY
       if (window.companionAPI?.moveAvatar) window.companionAPI.moveAvatar(dx, dy)
     }
   }
 
   function endAvatarDrag(event: PointerEvent<HTMLDivElement>) {
     if (avatarDragStart.current) {
+      const wasMoved = avatarDragStart.current.moved
       try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ok */ }
       avatarDragStart.current = null
+
+      if (!wasMoved) {
+        // Single click on Doraemon avatar in floating overlay window
+        if (isSleeping) {
+          setIsSleeping(false)
+          if (window.companionAPI) {
+            window.companionAPI.wakeAvatar()
+            window.companionAPI.sendSyncState({ isSleeping: false })
+          }
+        } else {
+          if (window.companionAPI) {
+            window.companionAPI.openDashboard()
+          } else {
+            window.location.search = '?view=dashboard'
+          }
+        }
+      }
+    }
+  }
+
+  // ── Avatar click handler ─────────────────────────────────────────────────────
+  function handleAvatarClick() {
+    if (isSleeping) {
+      setIsSleeping(false)
+      setNotice('Companion woke up.')
+      if (window.companionAPI) {
+        window.companionAPI.wakeAvatar()
+        window.companionAPI.sendSyncState({ isSleeping: false })
+      }
+      return
+    }
+    const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)]
+    setGreetingText(greeting)
+    setShowGreeting(true)
+    setAvatarState('Greeting') // friendly greeting wave animation
+    setTimeout(() => setAvatarState('Idle'), 2200)
+    // Auto-dismiss the greeting bubble after 2.8 seconds
+    setTimeout(() => setShowGreeting(false), 2800)
+
+    // Toggle chatbox open/closed immediately
+    setIsWindowOpen((prev) => {
+      const next = !prev
+      if (next) {
+        setTimeout(() => messageInputRef.current?.focus(), 60)
+      }
+      return next
+    })
+
+    // TTS greeting when opening
+    if (window.speechSynthesis && !isWindowOpen) {
+      try {
+        const utt = new SpeechSynthesisUtterance(greeting.replace(/[\u{1F60A}\u{1F31F}\u{1F680}\u{1F4AD}]/gu, ''))
+        utt.rate = 1.1; utt.pitch = 1.1; utt.volume = 0.7
+        window.speechSynthesis.speak(utt)
+      } catch { /* ok */ }
     }
   }
 
@@ -925,7 +1133,30 @@ function App() {
         }}
         title="Doraemon Desktop Companion (Double-click to open Mission Control)"
       >
-        <div className="avatar-float-stage">
+        <div
+          className="avatar-float-stage"
+          onClick={(e) => {
+            e.stopPropagation()
+            if (isSleeping) {
+              setIsSleeping(false)
+              if (window.companionAPI) {
+                window.companionAPI.wakeAvatar()
+                window.companionAPI.sendSyncState({ isSleeping: false })
+              }
+            } else {
+              if (window.companionAPI) {
+                window.companionAPI.openDashboard()
+              } else {
+                window.location.search = '?view=dashboard'
+              }
+            }
+          }}
+          style={{ cursor: 'pointer' }}
+          role="button"
+          tabIndex={0}
+          title="Click to open Mission Control / Chatbox"
+          aria-label="Click to open Mission Control / Chatbox"
+        >
           {isSleeping && (
             <div className="avatar-zzz-cloud" aria-hidden="true">
               <span className="z1">z</span>
@@ -990,6 +1221,8 @@ function App() {
   return (
     <div className="windows-desktop">
       <div className="desktop-wallpaper-glow" aria-hidden="true" />
+
+      {/* Desktop Shortcuts (left column) */}
       <nav className="desktop-shortcuts" aria-label="Desktop shortcuts">
         <button className="desktop-shortcut" onClick={() => { setActivePage('Companion'); setIsWindowOpen(true) }}>
           <span className="desktop-shortcut-icon companion-shortcut">✦</span><span>OmniCompanion</span>
@@ -1011,311 +1244,304 @@ function App() {
         </button>
       </nav>
 
-      {isWindowOpen && (
-        <section
-          className={`windows-app-frame ${isWindowMaximized ? 'window-maximized' : ''}`}
-          aria-label="OmniCompanion application window"
-          style={
-            !isWindowMaximized && windowPosition
-              ? { left: `${windowPosition.x}px`, top: `${windowPosition.y}px`, right: 'auto', bottom: 'auto', width: 'min(1120px, 86vw)', height: 'min(740px, 84vh)' }
-              : undefined
-          }
+      {/* Doraemon on Desktop */}
+      <section
+        className={`desktop-companion-stage state-${currentAvatarState.toLowerCase().replaceAll(' ', '-')} ${isSleeping ? 'is-sleeping' : ''} ${isMoving ? 'is-moving' : ''}`}
+        style={companionStyle}
+        role="region"
+        aria-label="Floating Doraemon Companion"
+        tabIndex={0}
+        onPointerDown={beginCompanionDrag}
+        onPointerMove={moveCompanion}
+        onPointerUp={endCompanionDrag}
+        onPointerCancel={endCompanionDrag}
+        onKeyDown={nudgeCompanion}
+      >
+        {/* Greeting speech bubble */}
+        {showGreeting && (
+          <div className="companion-speech-bubble" role="status">
+            <p>{greetingText}</p>
+          </div>
+        )}
+
+        {/* Avatar (clickable) */}
+        <div
+          className={`avatar-float-stage avatar-state-${animState}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            handleAvatarClick()
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label="Doraemon companion. Click to chat"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              handleAvatarClick()
+            }
+          }}
+          style={{ cursor: 'pointer' }}
         >
-          <header
-            className="windows-titlebar"
-            style={{ cursor: isWindowMaximized ? 'default' : 'move' }}
-            onPointerDown={beginWindowDrag}
-            onPointerMove={moveWindowDrag}
-            onPointerUp={endWindowDrag}
-            onPointerCancel={endWindowDrag}
-            onDoubleClick={() => setIsWindowMaximized((v) => !v)}
+          {/* zzz cloud when sleeping */}
+          {isSleeping && (
+            <div className="avatar-zzz-cloud" aria-hidden="true">
+              <span className="z1">z</span>
+              <span className="z2">z</span>
+              <span className="z3">Z</span>
+            </div>
+          )}
+
+          <div className="avatar-image-wrapper">
+            <AvatarCharacter state={animState} size={180} facing={facing} />
+          </div>
+          <div className="avatar-ground-shadow" aria-hidden="true" />
+        </div>
+
+        {/* Small hint text under Doraemon */}
+        {!isWindowOpen && !isSleeping && (
+          <div
+            className="avatar-click-hint"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleAvatarClick()
+            }}
+            role="button"
+            tabIndex={0}
+            style={{ cursor: 'pointer', pointerEvents: 'auto' }}
           >
-            <div className="windows-titlebar-brand"><span>✦</span><strong>OmniCompanion AI</strong></div>
-            <div className="windows-titlebar-actions">
-              <button aria-label="Minimize window" title="Minimize" onClick={() => setIsWindowOpen(false)}>－</button>
-              <button aria-label={isWindowMaximized ? 'Restore window' : 'Maximize window'} title={isWindowMaximized ? 'Restore' : 'Maximize'} onClick={() => setIsWindowMaximized((v) => !v)}>{isWindowMaximized ? '❐' : '□'}</button>
-              <button className="window-close" aria-label="Close window" title="Close" onClick={() => setIsWindowOpen(false)}>×</button>
+            ✦ Click to chat ✦
+          </div>
+        )}
+
+        {/* Drag hint */}
+        <div className="avatar-drag-hint" aria-hidden="true">
+          <span>⠿</span>
+          <span>Drag to move</span>
+        </div>
+      </section>
+
+      {/* Chat Panel (pastel popup) */}
+      {isWindowOpen && (
+        <section className="chat-popup-panel" aria-label="OmniCompanion Chat">
+          <header className="chat-popup-header">
+            <div className="chat-popup-brand">
+              <AvatarCharacter state={animState} size={48} facing="right" />
+              <div>
+                <strong>OmniCompanion</strong>
+                <span>{isVoiceRecording ? '🎤 Listening…' : currentAvatarState}</span>
+              </div>
+            </div>
+            <div className="chat-popup-controls">
+              <button
+                onClick={() => setIsWindowOpen(false)}
+                aria-label="Minimize chat"
+                title="Minimize"
+              >−</button>
+              <button
+                onClick={() => setIsWindowOpen(false)}
+                aria-label="Close chat"
+                title="Close"
+              >×</button>
             </div>
           </header>
-          <div className="windows-app-content">
-            <div className={`app-shell ${!isAssistantPanelOpen ? 'assistant-panel-closed' : ''}`}>
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-icon" aria-hidden="true">✦</div>
-          <div>
-            <strong>JM VERTEX</strong>
-            <span>DESKTOP COMPANION</span>
-          </div>
-        </div>
 
-        <button className="new-chat" onClick={startNewConversation}>
-          <span aria-hidden="true">＋</span> New conversation
-        </button>
+          {/* Tab navigation */}
+          <nav className="chat-popup-tabs" aria-label="Chat sections">
+            {navigation.map(({ label, icon }) => (
+              <button
+                key={label}
+                className={activePage === label ? 'active' : ''}
+                aria-current={activePage === label ? 'page' : undefined}
+                onClick={() => setActivePage(label)}
+              >
+                {icon} {label}
+                {label === 'Task History' && tasks.length > 0 && (
+                  <span style={{ marginLeft: 4, fontSize: 10, background: '#E8A87C', color: '#fff', borderRadius: 8, padding: '1px 5px', fontWeight: 'bold' }}>
+                    {tasks.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
 
-        <p className="side-label">WORKSPACE</p>
-        <nav className="navigation" aria-label="Main navigation">
-          {navigation.map(({ label, icon }) => (
-            <button
-              key={label}
-              className={`nav-item ${activePage === label ? 'active' : ''}`}
-              aria-current={activePage === label ? 'page' : undefined}
-              onClick={() => setActivePage(label)}
-            >
-              <span className="nav-icon" aria-hidden="true">{icon}</span>
-              {label}
-              {label === 'Task History' && tasks.length > 0 && (
-                <span className="nav-count">{tasks.length}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-status">
-          <span className="status-light" />
-          <div>
-            <strong>LOCAL PREVIEW</strong>
-            <span>No services connected</span>
-          </div>
-        </div>
-        <div className="sidebar-footer">
-          <span className="user-avatar">V</span>
-          <div className="user-info">
-            <strong>Local workspace</strong>
-            <span>Personal desktop</span>
-          </div>
-          <span className="footer-menu" aria-hidden="true">···</span>
-        </div>
-      </aside>
-
-      <main className="main-panel">
-        <header className="topbar">
-          <div className="breadcrumb">
-            <span>Workspace</span>
-            <span className="breadcrumb-divider">/</span>
-            <strong>{activePage}</strong>
-          </div>
-          <div className="topbar-meta">
-            <button
-              type="button"
-              className="minimize-panel-btn"
-              onClick={() => {
-                if (window.companionAPI) {
-                  window.companionAPI.wakeAvatar()
-                  window.companionAPI.closeDashboard()
-                } else {
-                  setIsAssistantPanelOpen(false)
-                }
-              }}
-              title="Minimize to floating avatar mode"
-              aria-label="Minimize to floating avatar mode"
-            >
-              <span aria-hidden="true">⤢</span>
-              <span>Float Avatar</span>
-            </button>
-            <span className="topbar-divider" />
-            <button
-              type="button"
-              className={`mode-toggle-pill ${executionMode === 'real' ? 'mode-real' : 'mode-mock'}`}
-              onClick={async () => {
-                const next = executionMode === 'real' ? 'mock' : 'real'
-                setExecutionMode(next)
-                if (window.companionAPI?.setExecutionMode) {
-                  await window.companionAPI.setExecutionMode(next)
-                }
-                setNotice(`Switched to ${next === 'real' ? 'Real Windows Execution' : 'Mock Simulation'} mode.`)
-              }}
-              title="Click to toggle between Real Windows Execution and Mock Simulation mode"
-            >
-              <span className="mode-dot" />
-              {executionMode === 'real' ? 'REAL WINDOWS' : 'MOCK MODE'}
-            </button>
-            <span className="topbar-divider" />
-            <span className="window-label">DESKTOP COMPANION</span>
-          </div>
-        </header>
-
-        <div className="workspace-content">
-          {activePage === 'Companion' && (
-            <section className="companion-page" aria-label="Companion chat">
-              <div className="page-heading">
-                <div>
-                  <span className="eyebrow">YOUR WORKSPACE</span>
-                  <h1>Companion</h1>
-                  <p>Plan your next step. Nothing runs without your review.</p>
-                </div>
-                <div className={`current-status status-${currentAvatarState.toLowerCase().replaceAll(' ', '-')}`}>
-                  <span className="status-light" />
-                  {isSleeping ? 'Sleeping' : isVoiceRecording ? 'Listening' : isPaused ? 'Paused' : currentAvatarState}
-                </div>
-              </div>
-
-              <div className="chat-stage">
-                <div className="chat-toolbar">
-                  <div className="toolbar-title">
-                    <span className="toolbar-sparkle">✦</span>
-                    <div>
-                      <strong>Assistant chat</strong>
-                      <span>Voice & typed commands · try "Open Notepad", "Open Calculator", or "Open VS Code"</span>
-                    </div>
-                  </div>
-                  <button className="subtle-button" onClick={startNewConversation}>
-                    <span aria-hidden="true">＋</span> New chat
-                  </button>
-                </div>
-
-                <div className="chat-scroll" aria-live="polite">
+          <div className="chat-popup-body">
+            {/* ── Companion page ── */}
+            {activePage === 'Companion' && (
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <div className="chat-scroll-area" aria-live="polite">
                   {messages.length === 0 ? (
-                    <div className="welcome">
-                      <div className={`welcome-orb state-${currentAvatarState.toLowerCase().replaceAll(' ', '-')}`}>
-                        <span>✦</span>
-                      </div>
-                      <span className="eyebrow">OPEN APPS WITH VOICE OR TEXT</span>
-                      <h2>What's on your mind?</h2>
-                      <p>Speak with the microphone button or type: <em>"Open Notepad"</em>, <em>"Open Calculator"</em>, <em>"Open VS Code"</em></p>
-                      <div className="suggestions">
+                    <div className="chat-welcome">
+                      <h2>Hey there! 👋</h2>
+                      <p>Try opening an app — speak or type a command like <em>"Open Notepad"</em> or <em>"Open Calculator"</em></p>
+                      <div className="chat-suggestion-chips">
                         {[
-                          ['📝', 'Open Notepad', 'Launch Notepad text editor'],
-                          ['🔢', 'Open Calculator', 'Launch Windows Calculator'],
-                          ['📁', 'Open File Explorer', 'Browse files and folders'],
-                          ['💻', 'Open VS Code', 'Launch Visual Studio Code'],
-                        ].map(([icon, title, description]) => (
+                          ['📝', 'Open Notepad'],
+                          ['🔢', 'Open Calculator'],
+                          ['📁', 'Open File Explorer'],
+                          ['💻', 'Open VS Code'],
+                        ].map(([icon, title]) => (
                           <button
-                            className="suggestion-card"
+                            className="chat-chip"
                             key={title}
                             onClick={() => handleLaunchApp(title)}
                           >
-                            <span className="suggestion-icon" aria-hidden="true">{icon}</span>
-                            <span className="suggestion-copy">
-                              <strong>{title}</strong>
-                              <span>{description}</span>
-                            </span>
-                            <span className="card-arrow" aria-hidden="true">↗</span>
+                            <span aria-hidden="true">{icon}</span>
+                            {title}
                           </button>
                         ))}
                       </div>
                     </div>
                   ) : (
-                    <div className="conversation">
-                      {messages.map((item) => (
-                        <article className={`message message-${item.author.toLowerCase()}`} key={item.id}>
-                          <span className={`message-avatar ${item.author === 'Companion' ? 'assistant-avatar' : ''}`}>
-                            {item.author === 'You' ? 'V' : '✦'}
-                          </span>
-                          <div className="message-body">
-                            <div className="message-meta">
-                              <strong>{item.author}</strong>
-                              <time>{item.time}</time>
+                    messages.map((item) => (
+                      <div className={`chat-message ${item.author === 'You' ? 'user' : 'companion'}`} key={item.id}>
+                        <div className="chat-message-bubble">
+                          {item.text}
+                          {item.launchResult && (
+                            <div style={{ marginTop: 6 }}>
+                              <LaunchBanner result={item.launchResult} onCancel={cancelActiveTask} />
                             </div>
-                            <p>{item.text}</p>
-                            {item.launchResult && <LaunchBanner result={item.launchResult} onCancel={cancelActiveTask} />}
-                          </div>
-                        </article>
-                      ))}
-                    </div>
+                          )}
+                        </div>
+                        <div className="chat-message-time">{item.time}</div>
+                      </div>
+                    ))
                   )}
                 </div>
 
-                <div className="composer-area">
-                  {/* Voice Error Notice */}
-                  {voiceError && (
-                    <div className="voice-error-banner" role="alert">
-                      <span>⚠ {voiceError}</span>
-                      <button aria-label="Dismiss error" onClick={() => setVoiceError(null)}>×</button>
-                    </div>
-                  )}
-
-                  {/* Live Voice Recording & Transcript Preview Card */}
-                  {(isVoiceRecording || voiceTranscript) && (
-                    <div className="voice-preview-card" role="region" aria-label="Voice input preview">
-                      <div className="voice-preview-header">
-                        <div className="voice-indicator-wrap">
-                          <span className={`voice-pulse-dot ${isVoiceRecording ? 'is-recording' : ''}`} />
-                          <strong>{isVoiceRecording ? 'Listening… Speak your command' : 'Recognized Speech Transcript'}</strong>
+                {/* Voice recording card */}
+                {(isVoiceRecording || voiceTranscript) && (
+                  <div className="chat-voice-card">
+                    <div className="chat-voice-header">
+                      <span className="voice-recording-dot" aria-hidden="true" />
+                      <span>{isVoiceRecording ? 'Listening… Speak your command' : 'Recognized Speech'}</span>
+                      {isVoiceRecording && (
+                        <div className="voice-waveform" aria-hidden="true" style={{ marginLeft: 'auto' }}>
+                          {[1, 2, 3, 4, 5].map((barIndex) => {
+                            const dynamicHeight = Math.max(4, Math.min(20, Math.round((audioLevel / 100) * 18 * (0.6 + (barIndex % 3) * 0.25))))
+                            return <span key={barIndex} className="waveform-bar" style={{ height: `${dynamicHeight}px` }} />
+                          })}
                         </div>
-                        {isVoiceRecording && (
-                          <div className="voice-waveform" aria-hidden="true">
-                            {[1, 2, 3, 4, 5, 6, 7].map((barIndex) => {
-                              const dynamicHeight = Math.max(4, Math.min(24, Math.round((audioLevel / 100) * 22 * (0.6 + (barIndex % 3) * 0.25))))
-                              return <span key={barIndex} className="waveform-bar" style={{ height: `${dynamicHeight}px` }} />
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="voice-transcript-text">
-                        {voiceTranscript ? (
-                          <span>"{voiceTranscript}"</span>
-                        ) : (
-                          <span className="voice-placeholder">Listening for command (e.g. "Open Notepad", "Open Calculator")…</span>
-                        )}
-                      </div>
-
-                      <div className="voice-preview-actions">
-                        {isVoiceRecording ? (
+                      )}
+                    </div>
+                    <div className="chat-voice-transcript">
+                      {voiceTranscript
+                        ? `"${voiceTranscript}"`
+                        : <span style={{ opacity: 0.5 }}>Listening for command…</span>
+                      }
+                    </div>
+                    <div className="voice-card-actions">
+                      {isVoiceRecording ? (
+                        <>
                           <button
                             type="button"
-                            className="voice-action-btn stop-rec-btn"
+                            className="voice-card-btn primary"
+                            onClick={() => {
+                              clearVoiceAutoEndTimer()
+                              voiceService.stopListening()
+                              setIsVoiceRecording(false)
+                              setAudioLevel(0)
+                              const finalCmd = latestSpeechRef.current.trim()
+                              if (finalCmd) {
+                                setAvatarState('Thinking')
+                                handleLaunchApp(finalCmd)
+                              } else {
+                                setAvatarState('Idle')
+                              }
+                            }}
+                          >
+                            ⏹ Stop &amp; Launch
+                          </button>
+                          <button
+                            type="button"
+                            className="voice-card-btn danger"
+                            onClick={() => {
+                              clearVoiceAutoEndTimer()
+                              voiceService.stopListening()
+                              setIsVoiceRecording(false)
+                              setAudioLevel(0)
+                              setVoiceTranscript('')
+                              latestSpeechRef.current = ''
+                              setAvatarState('Idle')
+                            }}
+                          >
+                            ✕ Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="voice-card-btn primary"
+                            onClick={() => {
+                              if (voiceTranscript.trim()) {
+                                handleLaunchApp(voiceTranscript.trim())
+                              }
+                            }}
+                          >
+                            ↵ Launch Command
+                          </button>
+                          <button
+                            type="button"
+                            className="voice-card-btn secondary"
                             onClick={handleToggleVoice}
                           >
-                            ⏹ Stop Recording
+                            ↻ Speak Again
                           </button>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              className="voice-action-btn submit-voice-btn"
-                              onClick={() => {
-                                if (voiceTranscript.trim()) {
-                                  handleLaunchApp(voiceTranscript.trim())
-                                  setVoiceTranscript('')
-                                }
-                              }}
-                              disabled={!voiceTranscript.trim()}
-                            >
-                              ↵ Submit Command
-                            </button>
-                            <button
-                              type="button"
-                              className="voice-action-btn retry-voice-btn"
-                              onClick={handleToggleVoice}
-                            >
-                              ↻ Retry
-                            </button>
-                            <button
-                              type="button"
-                              className="voice-action-btn cancel-voice-btn"
-                              onClick={() => {
-                                setVoiceTranscript('')
-                                setVoiceError(null)
-                              }}
-                            >
-                              ✕ Dismiss
-                            </button>
-                          </>
-                        )}
-                      </div>
+                          <button
+                            type="button"
+                            className="voice-card-btn danger"
+                            onClick={() => {
+                              setVoiceTranscript('')
+                              latestSpeechRef.current = ''
+                            }}
+                          >
+                            ✕ Dismiss
+                          </button>
+                        </>
+                      )}
                     </div>
-                  )}
-
-                  {notice && (
-                    <div className="notice" role="status">
-                      <span aria-hidden="true">i</span>{notice}
-                      <button aria-label="Dismiss notification" onClick={() => setNotice('')}>×</button>
+                    <div className="voice-test-quick-chips">
+                      <span className="voice-quick-chip-label">Quick Test:</span>
+                      {(['Open Notepad', 'Open Calculator', 'Open Chrome', 'Open File Explorer'] as const).map((cmd) => (
+                        <button
+                          key={cmd}
+                          type="button"
+                          className="voice-quick-chip"
+                          onClick={() => handleSimulatedVoiceTest(cmd)}
+                          title={`Test voice input simulation: "${cmd}"`}
+                        >
+                          🎙️ {cmd}
+                        </button>
+                      ))}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  <form
-                    className="composer"
-                    onSubmit={(e) => { e.preventDefault(); sendMessage() }}
-                  >
-                    <label className="sr-only" htmlFor="message-input">Message your companion</label>
+                {/* Notice banner */}
+                {(notice || voiceError) && (
+                  <div className="chat-notice" role="status">
+                    <span aria-hidden="true">ℹ</span>
+                    {voiceError || notice}
+                    <button
+                      aria-label="Dismiss"
+                      onClick={() => { setNotice(''); setVoiceError(null) }}
+                    >×</button>
+                  </div>
+                )}
+
+                {/* Composer */}
+                <div className="chat-composer">
+                  <div className="chat-composer-row">
+                    <label className="sr-only" htmlFor="chat-message-input">Message your companion</label>
                     <textarea
-                      id="message-input"
+                      id="chat-message-input"
                       ref={messageInputRef}
                       value={message}
                       onChange={(e) => {
                         const val = e.target.value
                         setMessage(val)
+                        e.target.style.height = 'auto'
+                        e.target.style.height = `${Math.min(120, Math.max(42, e.target.scrollHeight))}px`
                         if (isVoiceRecording) {
                           latestSpeechRef.current = val
                           setVoiceTranscript(val)
@@ -1342,348 +1568,358 @@ function App() {
                             setAudioLevel(0)
                           }
                           sendMessage()
+                          if (messageInputRef.current) {
+                            messageInputRef.current.style.height = '42px'
+                          }
                         }
                       }}
-                      placeholder='Type or speak a command: "Open Notepad", "Open Calculator", "Open VS Code"…'
-                      rows={2}
+                      placeholder='Ask Doraemon or type "Open Notepad"…'
+                      rows={1}
                       disabled={isSleeping || launchState === 'launching' || launchState === 'running'}
                     />
-                    <div className="composer-footer">
-                      <div className="composer-tools">
-                        <button
-                          className={`icon-button mic-button ${isVoiceRecording ? 'mic-active' : ''}`}
-                          type="button"
-                          aria-label={isVoiceRecording ? 'Stop voice recording' : 'Speak to Doraemon (Microphone)'}
-                          title={isVoiceRecording ? 'Click to stop recording' : 'Speak with microphone'}
-                          onClick={handleToggleVoice}
-                        >
-                          <span aria-hidden="true">{isVoiceRecording ? '⏹' : '🎤'}</span>
-                        </button>
-                        <span className="input-hint">Enter to send <kbd>↵</kbd></span>
-                      </div>
-                      <button
-                        className="send-button"
-                        type="submit"
-                        disabled={!message.trim() || isSleeping || launchState === 'launching' || launchState === 'running'}
+                    <button
+                      type="button"
+                      className={`chat-mic-btn ${isVoiceRecording ? 'recording' : ''}`}
+                      aria-label={isVoiceRecording ? 'Stop voice recording' : 'Start voice input'}
+                      title={isVoiceRecording ? 'Stop recording' : 'Speak command'}
+                      onClick={handleToggleVoice}
+                    >
+                      {isVoiceRecording ? '⏹' : '🎤'}
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-send-btn"
+                      aria-label="Send message"
+                      title="Send"
+                      disabled={!message.trim() || isSleeping || launchState === 'launching' || launchState === 'running'}
+                      onClick={() => {
+                        sendMessage()
+                        if (messageInputRef.current) {
+                          messageInputRef.current.style.height = '42px'
+                        }
+                      }}
+                    >
+                      ↑
+                    </button>
+                  </div>
+                  <div className="chat-composer-helper">
+                    <span>↵ Send</span>
+                    <span>Shift+↵ New line</span>
+                    <span>🎙️ Auto-Voice</span>
+                    <button
+                      type="button"
+                      className="helper-voice-test-btn"
+                      onClick={() => handleSimulatedVoiceTest('Open Calculator')}
+                      title="Run quick voice test with 'Open Calculator'"
+                    >
+                      🎙️ Test Voice
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Task History page ── */}
+            {activePage === 'Task History' && (
+              <div style={{ padding: '16px', overflowY: 'auto', flex: 1 }}>
+                {tasks.length === 0 ? (
+                  <div className="chat-welcome">
+                    <h2>No tasks yet</h2>
+                    <p>App launches and requests will appear here.</p>
+                    <button
+                      className="chat-chip"
+                      onClick={() => setActivePage('Companion')}
+                    >
+                      ◈ Go to Chat
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {tasks.slice().reverse().map((task) => (
+                      <article
+                        key={task.id}
+                        style={{
+                          background: 'white',
+                          borderRadius: 12,
+                          padding: '10px 14px',
+                          border: '1px solid rgba(248,220,203,0.6)',
+                          boxShadow: '0 1px 4px rgba(84,72,63,0.07)',
+                        }}
                       >
-                        {launchState === 'launching' || launchState === 'running' ? 'Launching…' : 'Send'}{' '}
-                        <span aria-hidden="true">↑</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                          <div>
+                            <strong style={{ fontSize: 13, color: 'var(--warm-dark)' }}>{task.title}</strong>
+                            {task.launchResult && (
+                              <div style={{ marginTop: 4 }}>
+                                <LaunchBanner result={task.launchResult} />
+                              </div>
+                            )}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: 10,
+                              background: task.status === 'Completed' ? 'rgba(52,211,153,0.15)' : task.status === 'Failed' ? 'rgba(239,68,68,0.1)' : 'rgba(248,220,203,0.6)',
+                              color: task.status === 'Completed' ? '#059669' : task.status === 'Failed' ? '#DC2626' : 'var(--warm-mid)',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {task.status}
+                          </span>
+                        </div>
+                        {task.time && <div style={{ fontSize: 10, color: 'var(--warm-light)', marginTop: 4 }}>{task.time}</div>}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Settings page ── */}
+            {activePage === 'Settings' && (
+              <div style={{ padding: '16px', overflowY: 'auto', flex: 1 }}>
+                <div className="chat-welcome" style={{ alignItems: 'flex-start', textAlign: 'left' }}>
+                  <h2>Settings</h2>
+                  <p>Manage voice input, execution permissions, and companion controls.</p>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {/* ── Voice & Audio Testing Lab ── */}
+                  <div className="voice-lab-card">
+                    <div className="voice-lab-header">
+                      <span style={{ fontSize: 16 }}>🎙️</span>
+                      <strong>Voice &amp; Audio Testing Lab</strong>
+                      <span className="voice-test-badge live">READY</span>
+                    </div>
+                    <p className="voice-lab-subtitle">
+                      Diagnostic testing suite for microphone hardware, speech recognition, spoken responses, and automated voice tasks.
+                    </p>
+
+                    <div className="voice-lab-grid">
+                      {/* 1. Microphone Hardware Test */}
+                      <div className="voice-test-section">
+                        <div className="voice-test-row">
+                          <div>
+                            <div className="voice-test-title">1. Microphone Hardware &amp; Audio Meter</div>
+                            <div className="voice-test-desc">Real-time volume metering via Web Audio API AnalyserNode</div>
+                          </div>
+                          <button
+                            type="button"
+                            className={`voice-test-btn ${isTestingMic ? 'danger' : 'primary'}`}
+                            onClick={toggleMicTest}
+                          >
+                            {isTestingMic ? '⏹ Stop Mic Test' : '🎙️ Test Microphone'}
+                          </button>
+                        </div>
+
+                        <div className="voice-meter-container">
+                          <div className="voice-meter-bar">
+                            <div
+                              className="voice-meter-fill"
+                              style={{ width: `${Math.min(100, Math.max(0, isTestingMic ? micTestLevel : 0))}%` }}
+                            />
+                          </div>
+                          <div className="voice-meter-labels">
+                            <span>0 dB (Silence)</span>
+                            <span style={{ fontWeight: 600, color: isTestingMic && micTestLevel > 15 ? '#0284c7' : '#64748b' }}>
+                              Level: {isTestingMic ? `${micTestLevel}%` : 'Idle'}
+                            </span>
+                            <span>Peak (100%)</span>
+                          </div>
+                        </div>
+
+                        {micTestMsg && (
+                          <div className="voice-test-msg" role="status">
+                            {micTestMsg}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. Speech-to-Text Recognition Test */}
+                      <div className="voice-test-section">
+                        <div className="voice-test-row">
+                          <div>
+                            <div className="voice-test-title">2. Speech Recognition (STT)</div>
+                            <div className="voice-test-desc">
+                              Engine: {voiceService.isRecognitionSupported() ? 'Web Speech Recognition (Active)' : 'Automated Windows Voice Bridge'}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className={`voice-test-btn ${isTestingSpeech ? 'danger' : 'primary'}`}
+                            onClick={toggleSpeechTest}
+                          >
+                            {isTestingSpeech ? '⏹ Stop Listening' : '🗣️ Test Speech Recognition'}
+                          </button>
+                        </div>
+
+                        <div className="voice-transcript-box">
+                          {speechTestTranscript ? (
+                            `"${speechTestTranscript}"`
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>Live speech transcript will appear here when speaking...</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 3. Doraemon Spoken Voice (TTS) Test */}
+                      <div className="voice-test-section">
+                        <div className="voice-test-row">
+                          <div>
+                            <div className="voice-test-title">3. Spoken Voice Output (TTS)</div>
+                            <div className="voice-test-desc">Audible companion speech via Web SpeechSynthesis</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="voice-test-btn secondary"
+                            onClick={handleTestTTS}
+                            disabled={isTestingTTS}
+                          >
+                            {isTestingTTS ? '🔊 Speaking...' : '🔊 Test Doraemon Voice'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 4. Windows Voice Typing Engine */}
+                      <div className="voice-test-section">
+                        <div className="voice-test-row">
+                          <div>
+                            <div className="voice-test-title">4. Native Windows Voice Typing Engine</div>
+                            <div className="voice-test-desc">Software-automated dictation bridge (zero keyboard actions required)</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="voice-test-btn secondary"
+                            onClick={() => {
+                              if (window.companionAPI?.triggerVoiceTyping) {
+                                window.companionAPI.triggerVoiceTyping()
+                                setNotice('🎤 Windows Voice Typing active.')
+                              } else {
+                                setNotice('Available in Electron desktop mode.')
+                              }
+                            }}
+                          >
+                            🎙️ Trigger Voice Engine
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 5. End-to-End Voice Command Simulator */}
+                      <div className="voice-test-section">
+                        <div>
+                          <div className="voice-test-title">5. Voice Command Simulator (Full Workflow)</div>
+                          <div className="voice-test-desc">
+                            Simulate voice waveform, streaming transcript, Doraemon flight, and Windows app launch:
+                          </div>
+                        </div>
+                        <div className="voice-simulator-chips">
+                          {(['Open Notepad', 'Open Calculator', 'Open Chrome', 'Open File Explorer', 'Open VS Code'] as const).map((simCmd) => (
+                            <button
+                              key={simCmd}
+                              type="button"
+                              className="voice-sim-chip"
+                              onClick={() => {
+                                setActivePage('Companion')
+                                handleSimulatedVoiceTest(simCmd)
+                              }}
+                              title={`Simulate voice command: "${simCmd}"`}
+                            >
+                              🎙️ "{simCmd}"
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'white', borderRadius: 12, padding: '12px 14px', border: '1px solid rgba(248,220,203,0.6)' }}>
+                    <strong style={{ fontSize: 12, color: 'var(--warm-dark)', display: 'block', marginBottom: 6 }}>Windows Automation</strong>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: 'var(--warm-mid)' }}>Process verification via ShellExecute</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#34D399' }}>
+                        {window.companionAPI?.isElectron ? 'LIVE' : 'BRIDGE READY'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'white', borderRadius: 12, padding: '12px 14px', border: '1px solid rgba(248,220,203,0.6)' }}>
+                    <strong style={{ fontSize: 12, color: 'var(--warm-dark)', display: 'block', marginBottom: 6 }}>Launch Mode</strong>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: 'var(--warm-mid)' }}>{executionMode === 'real' ? 'Real Windows Execution' : 'Mock Simulation'}</span>
+                      <button
+                        style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 10, border: 'none', cursor: 'pointer', background: executionMode === 'real' ? 'rgba(52,211,153,0.15)' : 'rgba(245,158,11,0.15)', color: executionMode === 'real' ? '#059669' : '#D97706' }}
+                        onClick={async () => {
+                          const next = executionMode === 'real' ? 'mock' : 'real'
+                          setExecutionMode(next)
+                          if (window.companionAPI?.setExecutionMode) {
+                            await window.companionAPI.setExecutionMode(next)
+                          }
+                          setNotice(`Switched to ${next === 'real' ? 'Real Windows Execution' : 'Mock Simulation'} mode.`)
+                        }}
+                      >
+                        {executionMode === 'real' ? 'REAL' : 'MOCK'} ↔
                       </button>
                     </div>
-                  </form>
-                  <p className="privacy-note">
-                    {window.companionAPI?.isElectron
-                      ? 'Electron native mode — verified Windows process automation.'
-                      : 'Web preview mode — microphone and desktop bridge ready.'}
-                  </p>
-                </div>
-              </div>
-            </section>
-          )}
+                  </div>
 
-          {activePage === 'Task History' && (
-            <section className="content-page">
-              <span className="eyebrow">YOUR WORKSPACE</span>
-              <h1>Task history</h1>
-              <p className="page-description">All voice and typed requests including verified app launches this session.</p>
-              {tasks.length === 0 ? (
-                <div className="empty-state">
-                  <span aria-hidden="true">◷</span>
-                  <h2>No requests yet</h2>
-                  <p>Requests and verified app launches will appear here.</p>
-                  <button className="secondary-button" onClick={() => setActivePage('Companion')}>
-                    Go to Companion
+                  <div style={{ background: 'white', borderRadius: 12, padding: '12px 14px', border: '1px solid rgba(248,220,203,0.6)' }}>
+                    <strong style={{ fontSize: 12, color: 'var(--warm-dark)', display: 'block', marginBottom: 6 }}>Companion Sleep</strong>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, color: 'var(--warm-mid)' }}>{isSleeping ? 'Companion is sleeping' : 'Companion is active'}</span>
+                      <button
+                        style={{ fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 10, border: 'none', cursor: 'pointer', background: 'rgba(248,220,203,0.6)', color: 'var(--warm-dark)' }}
+                        onClick={() => {
+                          const next = !isSleeping
+                          setIsSleeping(next)
+                          setIsPaused(false)
+                          setNotice(next ? 'Companion is asleep.' : 'Companion woke up.')
+                          if (window.companionAPI) {
+                            if (next) { window.companionAPI.sleepAvatar() } else { window.companionAPI.wakeAvatar() }
+                            window.companionAPI.sendSyncState({ isSleeping: next })
+                          }
+                        }}
+                      >
+                        {isSleeping ? '☼ Wake' : '☾ Sleep'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'white', borderRadius: 12, padding: '12px 14px', border: '1px solid rgba(248,220,203,0.6)' }}>
+                    <strong style={{ fontSize: 12, color: 'var(--warm-dark)', display: 'block', marginBottom: 6 }}>Allowed Apps</strong>
+                    <span style={{ fontSize: 11, color: 'var(--warm-mid)' }}>Notepad, Calculator, File Explorer, Chrome, VS Code, WhatsApp</span>
+                  </div>
+
+                  <button
+                    className="chat-chip"
+                    style={{ marginTop: 4 }}
+                    onClick={startNewConversation}
+                  >
+                    ＋ New Conversation
                   </button>
                 </div>
-              ) : (
-                <div className="history-list">
-                  {tasks.slice().reverse().map((task) => (
-                    <article className="history-row" key={task.id}>
-                      <span className="history-icon" aria-hidden="true">▤</span>
-                      <div className="history-copy">
-                        <strong>{task.title}</strong>
-                        <span>
-                          {task.launchResult
-                            ? task.launchResult.realLaunch
-                              ? `Real launch · ${task.launchResult.displayName} · ${task.launchResult.verified ? 'Verified in tasklist' : 'Window unverified'}`
-                              : `Mock simulation mode · ${task.launchResult.displayName}`
-                            : 'Conversation message'}
-                        </span>
-                        {task.launchResult && <LaunchBanner result={task.launchResult} />}
-                      </div>
-                      <span className={`task-status status-${task.status.toLowerCase()}`}>{task.status}</span>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-
-          {activePage === 'Settings' && (
-            <section className="content-page">
-              <span className="eyebrow">PREFERENCES & SAFETY</span>
-              <h1>Settings</h1>
-              <p className="page-description">Manage voice input, execution permissions, and companion controls.</p>
-              <div className="settings-group">
-                <div className="settings-group-heading">
-                  <span className="settings-icon" aria-hidden="true">⌘</span>
-                  <div><strong>Permissions</strong><span>Controls and access status for system services.</span></div>
-                </div>
-                <div className="permission-row">
-                  <div><strong>Microphone Input</strong><span>Web Audio API and SpeechRecognition integration.</span></div>
-                  <span className="permission-state" style={{ color: '#34D399' }}>CONNECTED</span>
-                </div>
-                <div className="permission-row">
-                  <div><strong>Windows Automation</strong><span>Process verification via ShellExecute and tasklist.</span></div>
-                  <span className="permission-state" style={{ color: '#34D399' }}>
-                    {window.companionAPI?.isElectron ? 'LIVE' : 'BRIDGE READY'}
-                  </span>
-                </div>
               </div>
-              <div className="settings-group">
-                <div className="settings-group-heading">
-                  <span className="settings-icon" aria-hidden="true">✦</span>
-                  <div><strong>App Launcher</strong><span>Allowlisted applications: Notepad, Calculator, File Explorer, Chrome, VS Code, WhatsApp</span></div>
-                </div>
-                <div className="permission-row">
-                  <div><strong>Launch mode</strong><span>{executionMode === 'real' ? 'Real Windows Execution' : 'Mock Simulation'}</span></div>
-                  <span className="permission-state">{executionMode === 'real' ? 'REAL' : 'MOCK'}</span>
-                </div>
-                <div className="permission-row">
-                  <div><strong>Arbitrary commands</strong><span>Never executed. Only allowlisted identifiers accepted.</span></div>
-                  <span className="permission-state">BLOCKED</span>
-                </div>
-              </div>
-            </section>
-          )}
-        </div>
-      </main>
-
-      <aside className="mission-panel" aria-label="Mission Control">
-        <div className="mission-heading">
-          <div>
-            <span className="eyebrow">OVERVIEW</span>
-            <h2>Mission Control</h2>
-          </div>
-          <span className="mission-mark" aria-hidden="true">⌘</span>
-        </div>
-
-        <section className="control-card" aria-label="Companion controls">
-          <div className="control-card-heading">
-            <span className="status-light" />
-            <strong>{isSleeping ? 'Companion sleeping' : isVoiceRecording ? 'Listening to voice' : isPaused ? 'Companion paused' : 'Companion ready'}</strong>
-            <span className="live-label">LOCAL</span>
-          </div>
-          <div className="control-actions">
-            <button className="control-button pause-button" onClick={() => {
-              setIsPaused((p) => !p)
-              setNotice(isPaused ? 'Preview resumed.' : 'Preview paused.')
-            }} disabled={isSleeping}>
-              <span aria-hidden="true">{isPaused ? '▶' : 'Ⅱ'}</span>{isPaused ? 'Resume' : 'Pause'}
-            </button>
-            <button className="control-button stop-button" onClick={stopTasks} disabled={!liveProgress && activeTasks.length === 0}>
-              <span aria-hidden="true">■</span>Stop
-            </button>
-          </div>
-          <button className="sleep-button" onClick={() => {
-            const next = !isSleeping
-            setIsSleeping(next)
-            setIsPaused(false)
-            setNotice(next ? 'Companion is asleep.' : 'Companion woke up.')
-            if (window.companionAPI) {
-              if (next) { window.companionAPI.sleepAvatar() } else { window.companionAPI.wakeAvatar() }
-              window.companionAPI.sendSyncState({ isSleeping: next })
-            }
-          }}>
-            <span aria-hidden="true">{isSleeping ? '☼' : '☾'}</span>
-            {isSleeping ? 'Wake companion' : 'Put companion to sleep'}
-            <span className="sleep-arrow" aria-hidden="true">→</span>
-          </button>
-        </section>
-
-        {/* Mission status & launch banner */}
-        {currentLaunchResult && (
-          <section className="mission-section" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 8, paddingBottom: 8 }}>
-            <LaunchBanner result={currentLaunchResult} onCancel={cancelActiveTask} />
-          </section>
-        )}
-
-        {/* ── Live Multi-Stage Task Timeline in Mission Control ── */}
-        <section className="mission-section live-timeline-section">
-          <div className="section-heading">
-            <div>
-              <h3>Task Timeline</h3>
-              <p>{liveProgress?.rawCommand ? `"${liveProgress.rawCommand}"` : `${activeTasks.length} active · ${tasks.length} total`}</p>
-            </div>
-            {liveProgress && (
-              <span style={{
-                fontSize: 10,
-                padding: '2px 6px',
-                borderRadius: 4,
-                fontWeight: 'bold',
-                background: liveProgress.executionMode === 'real' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                color: liveProgress.executionMode === 'real' ? '#34D399' : '#FBBF24',
-              }}>
-                {liveProgress.executionMode === 'real' ? 'REAL' : 'MOCK'}
-              </span>
             )}
           </div>
 
-          {liveProgress ? (
-            <>
-              <div className="progress-block">
-                <div className="progress-label">
-                  <span>{liveProgress.currentStageId.toUpperCase().replaceAll('_', ' ')}</span>
-                  <strong>{liveProgress.percent}%</strong>
-                </div>
-                <div className="progress-track" role="progressbar" aria-valuenow={liveProgress.percent} aria-valuemin={0} aria-valuemax={100}>
-                  <span style={{ width: `${liveProgress.percent}%` }} />
-                </div>
-                <span className="progress-caption">
-                  {liveProgress.currentStageId === 'launch_verified'
-                    ? (liveProgress.isVerified ? '✔ Verified execution in Windows tasklist' : 'Attempted launch completed')
-                    : liveProgress.currentStageId === 'failed'
-                    ? `✖ Failed: ${liveProgress.error || 'Execution error'}`
-                    : liveProgress.currentStageId === 'cancelled'
-                    ? '⏹ Task cancelled by user'
-                    : 'Windows automation in progress…'}
-                </span>
-              </div>
-
-              {/* Active Cancel Task Button */}
-              {liveProgress.currentStageId !== 'launch_verified' && liveProgress.currentStageId !== 'failed' && liveProgress.currentStageId !== 'cancelled' && (
-                <button type="button" className="timeline-cancel-btn" onClick={cancelActiveTask}>
-                  ⏹ Cancel Active Task
-                </button>
+          {/* Task status bar at bottom of chat (compact) */}
+          {liveProgress && (
+            <div className="chat-task-status" role="status" aria-live="polite">
+              <span className="task-status-dot" aria-hidden="true" />
+              <span>{liveProgress.currentStageId.replace(/_/g, ' ')}</span>
+              <strong>{liveProgress.percent}%</strong>
+              {liveProgress.currentStageId !== 'launch_verified'
+                && liveProgress.currentStageId !== 'failed'
+                && liveProgress.currentStageId !== 'cancelled' && (
+                <button onClick={cancelActiveTask} aria-label="Cancel task">✕</button>
               )}
-
-              <ol className="live-stages-list">
-                {liveProgress.stages.map((st) => {
-                  const icon =
-                    st.status === 'completed' ? '✔' :
-                    st.status === 'in_progress' ? '⟳' :
-                    st.status === 'failed' ? '✖' :
-                    st.status === 'cancelled' ? '⏹' : '○'
-                  return (
-                    <li className={`timeline-item stage-${st.status}`} key={st.id}>
-                      <span className="timeline-marker stage-marker">{icon}</span>
-                      <div className="timeline-task">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <strong>{st.label}</strong>
-                          {st.timestamp && <span style={{ fontSize: 10, opacity: 0.7 }}>{st.timestamp}</span>}
-                        </div>
-                        {st.detail && <span className="timeline-detail">{st.detail}</span>}
-                      </div>
-                    </li>
-                  )
-                })}
-              </ol>
-            </>
-          ) : (
-            <div className="timeline-empty">
-              <span className="empty-timeline-icon" aria-hidden="true">⌁</span>
-              <strong>All clear</strong>
-              <p>Speak or type a command to view real-time stage progression.</p>
             </div>
           )}
-        </section>
-
-        <section className="permission-card">
-          <div className="permission-card-heading">
-            <span className="permission-icon" aria-hidden="true">◇</span>
-            <div><strong>System Controls</strong><span>Hardware & automation status</span></div>
-          </div>
-          <div className="permission-line">
-            <span>Microphone</span>
-            <span className="permission-state" style={{ color: isVoiceRecording ? '#EF4444' : '#34D399' }}>
-              {isVoiceRecording ? 'RECORDING' : 'READY'}
-            </span>
-          </div>
-          <div className="permission-line">
-            <span>Windows Automation</span>
-            <span className="permission-state" style={{ color: '#34D399' }}>
-              {window.companionAPI?.isElectron ? 'LIVE' : 'ACTIVE'}
-            </span>
-          </div>
-          <button className="manage-permissions" onClick={() => setActivePage('Settings')}>
-            Review permissions <span aria-hidden="true">→</span>
-          </button>
-        </section>
-
-        <div className="mission-footer">JM VERTEX TECHNOLOGIES <span>·</span> COMPANION ENGINE</div>
-      </aside>
-            </div>
-          </div>
         </section>
       )}
 
-      {/* Floating Doraemon Desktop Companion (Always visible and moves across the desktop) */}
-      <section
-        className={`compact-floating-avatar state-${currentAvatarState.toLowerCase().replaceAll(' ', '-')} ${isSleeping ? 'is-sleeping' : ''} ${isMoving ? 'is-moving' : ''}`}
-        style={companionStyle}
-        role="region"
-        aria-label="Floating Doraemon Companion"
-        tabIndex={0}
-        onPointerDown={beginCompanionDrag}
-        onPointerMove={moveCompanion}
-        onPointerUp={endCompanionDrag}
-        onPointerCancel={endCompanionDrag}
-        onKeyDown={nudgeCompanion}
-      >
-        <div className={`avatar-float-stage avatar-state-${animState}`}>
-          {isSleeping && (
-            <div className="avatar-zzz-cloud" aria-hidden="true">
-              <span className="z1">z</span>
-              <span className="z2">z</span>
-              <span className="z3">Z</span>
-            </div>
-          )}
-
-          <div className="avatar-image-wrapper">
-            <AvatarCharacter state={animState} size={150} facing={facing} />
-          </div>
-
-          <div className="avatar-ground-shadow" aria-hidden="true" />
-        </div>
-
-        <div className="avatar-controls-dock" role="toolbar" aria-label="Avatar quick controls">
-          <button
-            type="button"
-            className={`avatar-control-btn ${isWindowOpen ? 'active' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsWindowOpen((p) => !p)
-            }}
-            title={isWindowOpen ? 'Minimize window' : 'Restore window'}
-            aria-label={isWindowOpen ? 'Minimize window' : 'Restore window'}
-          >
-            <span className="control-icon" aria-hidden="true">✦</span>
-            <span className="control-text">{isWindowOpen ? 'Hide' : 'Open'}</span>
-          </button>
-
-          <button
-            type="button"
-            className={`avatar-control-btn sleep-toggle ${isSleeping ? 'is-sleeping' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              setIsSleeping((p) => !p)
-              setIsPaused(false)
-              setNotice(isSleeping ? 'Companion woke up.' : 'Companion is now sleeping.')
-            }}
-            title={isSleeping ? 'Wake companion' : 'Put companion to sleep'}
-            aria-label={isSleeping ? 'Wake companion' : 'Put companion to sleep'}
-          >
-            <span className="control-icon" aria-hidden="true">{isSleeping ? '☼' : '☾'}</span>
-            <span className="control-text">{isSleeping ? 'Wake' : 'Sleep'}</span>
-          </button>
-        </div>
-
-        <div className="avatar-drag-hint" aria-hidden="true">
-          <span>⠿</span>
-          <span>Drag to move</span>
-        </div>
-      </section>
-
+      {/* Start Menu */}
       {isStartMenuOpen && (
         <>
           <button className="start-menu-backdrop" aria-label="Close Start menu" onClick={() => setIsStartMenuOpen(false)} />
@@ -1725,6 +1961,7 @@ function App() {
         </>
       )}
 
+      {/* Taskbar */}
       <footer className="windows-taskbar">
         <button className={`taskbar-start ${isStartMenuOpen ? 'taskbar-active' : ''}`} aria-label="Start" title="Start" onClick={() => setIsStartMenuOpen((v) => !v)}><span className="windows-logo"><i /><i /><i /><i /></span></button>
         <button className="taskbar-search" onClick={() => setIsStartMenuOpen(true)}><span>⌕</span><small>Search</small></button>
