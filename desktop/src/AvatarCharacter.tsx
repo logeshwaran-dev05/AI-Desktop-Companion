@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { CSSProperties } from 'react'
 
 export type AvatarAnimState =
   | 'idle'
+  | 'walking'
   | 'listening'
   | 'thinking'
   | 'waiting'
@@ -21,12 +22,25 @@ interface AvatarCharacterProps {
   facing?: 'left' | 'right'
 }
 
+/** Pre-extracted walking frames (facing right natively, mirrored left during travel) */
+const WALK_FRAMES = [
+  '/doraemon/walk/walk_01.png?v=stride2',
+  '/doraemon/walk/walk_02.png?v=stride2',
+  '/doraemon/walk/walk_03.png?v=stride2',
+  '/doraemon/walk/walk_04.png?v=stride2',
+  '/doraemon/walk/walk_05.png?v=stride2',
+  '/doraemon/walk/walk_06.png?v=stride2',
+  '/doraemon/walk/walk_07.png?v=stride2',
+  '/doraemon/walk/walk_08.png?v=stride2',
+]
+
 /**
  * Doraemon — Original Companion Character
  * ========================================
- * Renders the original Doraemon character with responsive state-driven
- * animations (floating Take-copter, sprint runs, celebration jumps,
- * thought bubbles, speed streaks, listening soundwaves, and sparkles).
+ * Renders the authentic Doraemon character with responsive state-driven
+ * animations (animated walk cycle extracted directly from reference video,
+ * floating Take-copter, sprint runs, celebration jumps, thought bubbles,
+ * listening soundwaves, and sparkles).
  */
 export default function AvatarCharacter({
   state,
@@ -36,7 +50,9 @@ export default function AvatarCharacter({
   facing = 'right',
 }: AvatarCharacterProps) {
   const [imgSrc, setImgSrc] = useState('/companion.webp')
+  const [walkFrameIdx, setWalkFrameIdx] = useState(0)
 
+  const isWalking = state === 'walking' || state === 'running'
   const isListening = state === 'listening'
   const isRunning = state === 'running'
   const isSuccess = state === 'success'
@@ -45,12 +61,36 @@ export default function AvatarCharacter({
   const isError = state === 'error'
   const isCancelled = state === 'cancelled'
 
+  // Preload all walking frames in memory so walking is instantaneous with zero stutter
+  useEffect(() => {
+    WALK_FRAMES.forEach((src) => {
+      const img = new Image()
+      img.src = src
+    })
+  }, [])
+
+  // Step through the 8 walking frames at natural anime pace (~110ms per frame)
+  useEffect(() => {
+    if (!isWalking) return
+
+    const timer = setInterval(() => {
+      setWalkFrameIdx((prev) => (prev + 1) % WALK_FRAMES.length)
+    }, 110)
+
+    return () => {
+      clearInterval(timer)
+      setWalkFrameIdx(0)
+    }
+  }, [isWalking])
+
   const wrapperClass = [
     'avatar-char-wrap',
     'avatar-doraemon-wrap',
     `avatar-state-${state}`,
     className ?? '',
   ].join(' ')
+
+  const currentDisplaySrc = isWalking ? WALK_FRAMES[walkFrameIdx] : imgSrc
 
   return (
     <div
@@ -136,14 +176,16 @@ export default function AvatarCharacter({
         </div>
       )}
 
-      {/* Running state: Wind / speed dash streaks */}
+      {/* Running state: Wind / speed dash streaks (trail behind movement) */}
       {isRunning && (
         <div
           className="doraemon-fx-running"
           style={{
             position: 'absolute',
             bottom: 12,
-            left: -18,
+            ...(facing === 'left'
+              ? { right: -18, transform: 'scaleX(-1)' }
+              : { left: -18, transform: 'none' }),
             pointerEvents: 'none',
             zIndex: 1,
             display: 'flex',
@@ -205,9 +247,9 @@ export default function AvatarCharacter({
         </div>
       )}
 
-      {/* ── Original Doraemon Image Asset ─────────────────────────────────── */}
+      {/* ── Doraemon Character Display (Walk frames or Idle Companion) ─── */}
       <img
-        src={imgSrc}
+        src={currentDisplaySrc}
         alt={`Doraemon companion — ${state}`}
         width={size}
         draggable={false}
@@ -216,7 +258,7 @@ export default function AvatarCharacter({
             setImgSrc('/companion.webp.png')
           }
         }}
-        className={`avatar-character-img doraemon-character-img ${isRunning ? 'doraemon-running-tilt' : ''} ${facing === 'left' ? 'doraemon-facing-left' : ''}`}
+        className={`avatar-character-img doraemon-character-img ${isWalking ? 'doraemon-walking-img' : ''} ${isRunning ? 'doraemon-running-tilt' : ''} ${facing === 'left' ? 'doraemon-facing-left' : 'doraemon-facing-right'}`}
         style={{
           display: 'block',
           width: size,
@@ -230,6 +272,8 @@ export default function AvatarCharacter({
             ? 'drop-shadow(0 0 16px rgba(239, 68, 68, 0.55)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
             : isSuccess
             ? 'drop-shadow(0 0 18px rgba(52, 211, 153, 0.6)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
+            : isWalking
+            ? 'drop-shadow(0 0 16px rgba(56, 189, 248, 0.55)) drop-shadow(0 10px 18px rgba(0,0,0,0.35))'
             : isRunning
             ? 'drop-shadow(0 0 18px rgba(56, 189, 248, 0.6)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
             : isListening

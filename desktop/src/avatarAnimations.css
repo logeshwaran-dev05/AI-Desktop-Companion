@@ -271,8 +271,28 @@
   transform: scaleX(-1);
 }
 
+.doraemon-facing-right {
+  transform: scaleX(1);
+}
+
 .doraemon-running-tilt.doraemon-facing-left {
-  transform: scaleX(-1) rotate(-6deg) skewX(3deg);
+  transform: scaleX(-1) rotate(6deg) skewX(-3deg);
+}
+
+.doraemon-running-tilt.doraemon-facing-right {
+  transform: rotate(6deg) skewX(-3deg);
+}
+
+/* ── Walking Animation (Sprite / Frame Cycle) ────────────────────────────── */
+.avatar-state-walking .avatar-char-wrap,
+.avatar-char-wrap.avatar-state-walking {
+  /* Let the extracted walking frames drive the natural step bounce */
+  animation: none;
+}
+
+.doraemon-walking-img {
+  image-rendering: auto;
+  transition: transform 0.2s ease-out;
 }
 
 /* ── Mode Toggle Pill & Movement Controls ────────────────────────────────── */

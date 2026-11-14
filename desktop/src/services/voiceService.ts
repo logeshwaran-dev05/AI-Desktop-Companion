@@ -2,15 +2,15 @@
  * Voice Interaction Service
  * =========================
  * Manages microphone audio stream, live audio volume metering (via Web Audio API
- * AnalyserNode), and speech-to-text recognition (via Web Speech API SpeechRecognition).
+ * AnalyserNode), speech-to-text recognition (via Web Speech API SpeechRecognition),
+ * and spoken voice output (via SpeechSynthesis).
  *
- * Handles:
- * - Permission requests and denied states
- * - Real-time volume level computation for live waveform visualizers
- * - Interim and final transcript collection
- * - Graceful fallback when SpeechRecognition is unavailable in the environment
- * - Thorough cleanup of audio tracks and recognition sessions
- * - Text-to-speech spoken feedback (optional)
+ * Capabilities:
+ * - Real-time microphone audio metering (0-100% scale) for waveforms & diagnostic tests
+ * - Resilient speech-to-text with full transcript aggregation across interim & final events
+ * - Graceful fallback and notice when cloud speech services are offline or blocked
+ * - Built-in Voice Testing Suite: mic hardware test, TTS speaker test, voice simulation
+ * - Safe resource cleanup preventing device locks and memory leaks
  */
 
 export interface VoiceError {
@@ -28,7 +28,7 @@ export interface VoiceError {
 export interface VoiceSessionCallbacks {
   onTranscript: (transcript: string, isFinal: boolean) => void;
   onAudioLevel?: (level: number) => void; // 0 to 100
-  onError: (error: VoiceError) => void;
+  onError?: (error: VoiceError) => void;
   onNotice?: (message: string) => void;
   onEnd: () => void;
 }
@@ -46,6 +46,7 @@ class VoiceService {
   private animFrameId: number | null = null;
   private recognition: any = null;
   private isRecording = false;
+  private simulationTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * Checks whether the current browser / Electron environment supports SpeechRecognition.
@@ -61,9 +62,16 @@ class VoiceService {
    */
   public async requestMicrophoneAccess(): Promise<MediaStream> {
     if (!navigator?.mediaDevices?.getUserMedia) {
-      throw new Error('getUserMedia is not supported on this platform.');
+      throw new Error('Microphone access is not supported on this platform.');
     }
-    return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    });
   }
 
   /**
@@ -74,45 +82,24 @@ class VoiceService {
   public async startListening(callbacks: VoiceSessionCallbacks): Promise<boolean> {
     // Prevent duplicate recording sessions
     if (this.isRecording) {
-      console.warn('[VoiceService] Recording is already active. Ignoring start request.');
-      return true;
-    }
-
-    // 1. Capture microphone stream
-    try {
-      this.activeStream = await this.requestMicrophoneAccess();
-    } catch (err: unknown) {
-      const errorObj = err as { name?: string; message?: string };
-      if (errorObj.name === 'NotAllowedError' || errorObj.name === 'PermissionDeniedError') {
-        callbacks.onError({
-          type: 'not-allowed',
-          message: 'Microphone permission denied. Please allow microphone access in Windows / browser settings.',
-        });
-      } else if (errorObj.name === 'NotFoundError' || errorObj.name === 'DevicesNotFoundError') {
-        callbacks.onError({
-          type: 'no-microphone',
-          message: 'No microphone found on this device. Please connect an audio input device.',
-        });
-      } else {
-        callbacks.onError({
-          type: 'audio-capture',
-          message: errorObj.message || 'Could not access microphone.',
-        });
-      }
-      callbacks.onEnd();
-      return false;
+      this.stopListening();
     }
 
     this.isRecording = true;
 
-    // 2. Setup live audio metering for waveform animation
+    // 1. Attempt live audio metering for waveform animation (non-blocking)
     try {
+      this.activeStream = await this.requestMicrophoneAccess();
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
+      if (AudioCtx && this.activeStream) {
         this.audioContext = new AudioCtx();
+        if (this.audioContext.state === 'suspended') {
+          await this.audioContext.resume().catch(() => {});
+        }
         const source = this.audioContext.createMediaStreamSource(this.activeStream);
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = 64;
+        this.analyser.smoothingTimeConstant = 0.5;
         source.connect(this.analyser);
 
         const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
@@ -120,13 +107,11 @@ class VoiceService {
           if (!this.isRecording || !this.analyser) return;
           this.analyser.getByteFrequencyData(dataArray);
 
-          // Calculate average audio level
           let sum = 0;
           for (let i = 0; i < dataArray.length; i++) {
             sum += dataArray[i];
           }
           const average = sum / dataArray.length;
-          // Normalize to 0-100 scale
           const normalized = Math.min(100, Math.round((average / 128) * 100));
 
           if (callbacks.onAudioLevel) {
@@ -138,36 +123,39 @@ class VoiceService {
 
         this.animFrameId = requestAnimationFrame(pollAudioLevel);
       }
-    } catch (meterErr) {
-      console.warn('[VoiceService] AudioContext metering init skipped:', meterErr);
+    } catch (meterErr: unknown) {
+      console.warn('[VoiceService] AudioContext metering init skipped or mic busy:', meterErr);
+      // Metering failure must not block speech recognition attempt
     }
 
-    // 3. Runtime recognition handling:
-    // In Electron, Chromium's built-in Web Speech API delegates to Google Cloud servers
-    // without API keys, causing a persistent 'network' error.
-    // We seamlessly invoke Windows Native Voice Typing (Win + H) while keeping local Web Audio metering active.
-    const isElectronEnv = typeof window !== 'undefined' && Boolean(window.companionAPI?.isElectron);
-
+    // 2. Electron runtime: Chromium's Web Speech API is blocked by Google (missing API keys).
+    // Automatically trigger native Windows Voice Typing in the background and keep the microphone
+    // recording session active with live volume waveforms and direct dictate-to-input automation.
+    const isElectronEnv = typeof window !== 'undefined' && Boolean((window as any).companionAPI?.isElectron);
     if (isElectronEnv) {
-      console.log('[VoiceService] Electron runtime detected. Using Windows Voice Typing (Win + H) & local Web Audio meter.');
+      console.log('[VoiceService] Electron runtime: engaging automatic background Voice Typing & mic metering...');
       if (window.companionAPI?.triggerVoiceTyping) {
-        window.companionAPI.triggerVoiceTyping().catch((err) => {
-          console.warn('[VoiceService] triggerVoiceTyping error:', err);
+        window.companionAPI.triggerVoiceTyping().catch((err: any) => {
+          console.warn('[VoiceService] triggerVoiceTyping warning:', err);
         });
       }
       if (callbacks.onNotice) {
-        callbacks.onNotice('Windows Voice Typing (Win + H) is active. Speak your command into the prompt.');
+        callbacks.onNotice('🎤 Microphone active. Speak your command (e.g. "Open Notepad" or "Open Calculator").');
       }
       return true;
     }
 
-    // 4. Initialize browser SpeechRecognition if supported (e.g. Chrome / Edge)
+    // 3. Browser runtime (Chrome/Edge): Use built-in SpeechRecognition
     if (!this.isRecognitionSupported()) {
-      callbacks.onError({
-        type: 'unsupported',
-        message: 'Speech recognition engine is not supported in this runtime. You can type commands directly.',
-      });
-      // We keep audio metering alive so user still sees microphone waveform
+      if (callbacks.onNotice) {
+        callbacks.onNotice('Speech recognition engine not built-in. Type your command or click a quick test chip.');
+      }
+      if (callbacks.onError) {
+        callbacks.onError({
+          type: 'unsupported',
+          message: 'Speech recognition engine is not supported in this runtime. Type commands or click a quick test chip.',
+        });
+      }
       return true;
     }
 
@@ -175,8 +163,9 @@ class VoiceService {
       const win = window as IWindowSpeech;
       const SpeechRecognitionConstructor = win.SpeechRecognition || win.webkitSpeechRecognition;
       this.recognition = new SpeechRecognitionConstructor();
-      this.recognition.continuous = false;
+      this.recognition.continuous = true;
       this.recognition.interimResults = true;
+      this.recognition.maxAlternatives = 1;
       this.recognition.lang = 'en-US';
 
       this.recognition.onstart = () => {
@@ -184,73 +173,197 @@ class VoiceService {
       };
 
       this.recognition.onresult = (event: any) => {
-        let interimTranscript = '';
         let finalTranscript = '';
+        let interimTranscript = '';
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const part = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalTranscript += part;
-          } else {
-            interimTranscript += part;
+        // Iterate through all results to build full continuous speech
+        for (let i = 0; i < event.results.length; ++i) {
+          const result = event.results[i];
+          if (result && result[0]) {
+            if (result.isFinal) {
+              finalTranscript += result[0].transcript + ' ';
+            } else {
+              interimTranscript += result[0].transcript;
+            }
           }
         }
 
-        const text = (finalTranscript || interimTranscript).trim();
-        if (text) {
-          callbacks.onTranscript(text, Boolean(finalTranscript));
+        const fullText = (finalTranscript + interimTranscript).trim();
+        if (fullText) {
+          callbacks.onTranscript(fullText, Boolean(finalTranscript.trim() && !interimTranscript.trim()));
         }
       };
 
       this.recognition.onerror = (event: any) => {
         console.warn('[VoiceService] SpeechRecognition error:', event.error);
         if (event.error === 'no-speech') {
-          callbacks.onError({
-            type: 'no-speech',
-            message: 'No speech was detected. Please speak clearly into your microphone.',
-          });
-        } else if (event.error === 'not-allowed') {
-          callbacks.onError({
-            type: 'not-allowed',
-            message: 'Speech recognition permission denied by system.',
-          });
-        } else if (event.error === 'network') {
-          // Fallback notice instead of fatal error
+          // Expected when user pauses; do not abort recording session immediately
+          return;
+        }
+
+        if (event.error === 'network') {
+          console.warn('[VoiceService] Web speech network unreachable (offline or blocked).');
           if (callbacks.onNotice) {
-            callbacks.onNotice('Speech recognition network service unavailable in this browser. Please type commands directly.');
-          } else {
+            callbacks.onNotice('Speech service unreachable. Type your command or click a quick test chip.');
+          }
+          return;
+        }
+
+        if (event.error === 'not-allowed') {
+          if (callbacks.onError) {
             callbacks.onError({
-              type: 'network',
-              message: 'Speech recognition network service unavailable in this runtime. Try typed commands.',
+              type: 'not-allowed',
+              message: 'Microphone permission denied by system. Please check Windows Privacy & security settings.',
             });
           }
-        } else {
+          this.stopListening();
+          callbacks.onEnd();
+          return;
+        }
+
+        if (event.error === 'audio-capture') {
+          if (callbacks.onError) {
+            callbacks.onError({
+              type: 'audio-capture',
+              message: 'No microphone was detected or audio device is busy.',
+            });
+          }
+          this.stopListening();
+          callbacks.onEnd();
+          return;
+        }
+
+        if (callbacks.onError) {
           callbacks.onError({
             type: 'unknown',
-            message: `Speech recognition error: ${event.error || 'Unknown error'}`,
+            message: `Speech recognition notice: ${event.error || 'Check microphone connection'}`,
           });
         }
       };
 
       this.recognition.onend = () => {
         console.log('[VoiceService] SpeechRecognition session ended.');
-        this.stopListening();
-        callbacks.onEnd();
+        if (this.isRecording && !isElectronEnv) {
+          // If ended unexpectedly while still in recording mode, finalize session
+          this.stopListening();
+          callbacks.onEnd();
+        }
       };
 
       this.recognition.start();
     } catch (recErr: any) {
-      console.warn('[VoiceService] Failed to start recognition:', recErr);
-      callbacks.onError({
-        type: 'unknown',
-        message: recErr?.message || 'Could not start speech recognition session.',
-      });
-      this.stopListening();
-      callbacks.onEnd();
-      return false;
+      console.warn('[VoiceService] Failed to start recognition instance:', recErr);
+      if (callbacks.onNotice) {
+        callbacks.onNotice('Microphone active. Speak into the prompt or click a test command.');
+      }
     }
 
     return true;
+  }
+
+  /**
+   * Dedicated microphone hardware test:
+   * Opens microphone audio stream and provides continuous audio level updates (0-100%).
+   * Returns a cleanup function to stop the test.
+   */
+  public async testMicrophone(onAudioLevel: (level: number) => void): Promise<() => void> {
+    const stream = await this.requestMicrophoneAccess();
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) {
+      throw new Error('Web Audio API is not supported on this platform.');
+    }
+
+    const ctx = new AudioCtx();
+    if (ctx.state === 'suspended') {
+      await ctx.resume().catch(() => {});
+    }
+
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 64;
+    source.connect(analyser);
+
+    let active = true;
+    let frameId: number | null = null;
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    const checkLevel = () => {
+      if (!active) return;
+      analyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+      }
+      const avg = sum / dataArray.length;
+      const normalized = Math.min(100, Math.round((avg / 128) * 100));
+      onAudioLevel(normalized);
+      frameId = requestAnimationFrame(checkLevel);
+    };
+
+    frameId = requestAnimationFrame(checkLevel);
+
+    return () => {
+      active = false;
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      try {
+        stream.getTracks().forEach((t) => t.stop());
+        if (ctx.state !== 'closed') ctx.close().catch(() => {});
+      } catch {
+        // ignore
+      }
+      onAudioLevel(0);
+    };
+  }
+
+  /**
+   * Simulates a voice command for testing and offline environments.
+   * Generates simulated live audio meter waveforms, word-by-word streaming transcripts,
+   * and dispatches final command to callbacks.
+   */
+  public async simulateVoiceCommand(
+    command: string,
+    callbacks: VoiceSessionCallbacks
+  ): Promise<void> {
+    this.stopListening();
+    this.isRecording = true;
+
+    // Simulate animated waveform audio levels
+    let step = 0;
+    const waveInterval = setInterval(() => {
+      if (!this.isRecording) {
+        clearInterval(waveInterval);
+        return;
+      }
+      step++;
+      const simulatedLevel = Math.round(35 + Math.sin(step * 0.7) * 35 + (step % 3) * 10);
+      if (callbacks.onAudioLevel) {
+        callbacks.onAudioLevel(Math.min(95, Math.max(15, simulatedLevel)));
+      }
+    }, 70);
+
+    const words = command.trim().split(/\s+/);
+    let cumulative = '';
+
+    for (let i = 0; i < words.length; i++) {
+      if (!this.isRecording) {
+        clearInterval(waveInterval);
+        return;
+      }
+      cumulative = (cumulative + ' ' + words[i]).trim();
+      const isFinal = i === words.length - 1;
+      callbacks.onTranscript(cumulative, isFinal);
+      await new Promise((r) => setTimeout(r, 220));
+    }
+
+    // Brief pause before finalizing
+    await new Promise((r) => setTimeout(r, 300));
+    clearInterval(waveInterval);
+
+    this.isRecording = false;
+    if (callbacks.onAudioLevel) {
+      callbacks.onAudioLevel(0);
+    }
+    callbacks.onEnd();
   }
 
   /**
@@ -259,6 +372,11 @@ class VoiceService {
    */
   public stopListening(): void {
     this.isRecording = false;
+
+    if (this.simulationTimer !== null) {
+      clearTimeout(this.simulationTimer);
+      this.simulationTimer = null;
+    }
 
     if (this.animFrameId !== null) {
       cancelAnimationFrame(this.animFrameId);
@@ -269,6 +387,7 @@ class VoiceService {
       try {
         this.recognition.onend = null;
         this.recognition.onerror = null;
+        this.recognition.onresult = null;
         this.recognition.stop();
       } catch {
         // ignore
@@ -308,19 +427,29 @@ class VoiceService {
   /**
    * Speaks a response text aloud using browser SpeechSynthesis if supported.
    */
-  public speakResponse(text: string): void {
+  public speakResponse(text: string, onEnd?: () => void): void {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     try {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
+      // Clean emojis and symbols for speech synthesis
+      const cleanText = text.replace(/[\u{1F300}-\u{1FAFF}]/gu, '').replace(/[✦⧗✔✖⏹⚠⊘◈◷⚙]/g, '').trim();
+      if (!cleanText) return;
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.rate = 1.05;
-      utterance.pitch = 1.1; // Friendly tone for Doraemon
+      utterance.pitch = 1.1; // Friendly Doraemon pitch
+
+      if (onEnd) {
+        utterance.onend = onEnd;
+        utterance.onerror = () => onEnd();
+      }
+
       window.speechSynthesis.speak(utterance);
     } catch (err) {
       console.warn('[VoiceService] Speech synthesis failed:', err);
+      if (onEnd) onEnd();
     }
   }
 }
 
 export const voiceService = new VoiceService();
-
