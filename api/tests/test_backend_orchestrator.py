@@ -3,6 +3,7 @@ Unit tests for Task Orchestrator, State Machine, and Permission Evaluator.
 """
 
 import unittest
+from typing import Any, Dict
 from unittest.mock import MagicMock
 
 from api.orchestrator import (
@@ -117,7 +118,7 @@ class TestTaskOrchestrator(unittest.TestCase):
     """Verify task orchestration, planning integration, adapter dispatch, and cancellation."""
 
     def setUp(self):
-        self.tasks_store = {}
+        self.tasks_store: Dict[str, Dict[str, Any]] = {}
         self.mock_adapter = MagicMock()
         self.orchestrator = TaskOrchestrator(
             adapter=self.mock_adapter,
@@ -262,12 +263,14 @@ class TestTaskOrchestrator(unittest.TestCase):
         # Notepad should be marked allowlisted=True
         notepad_item = self.orchestrator.get_app_by_id("notepad")
         self.assertIsNotNone(notepad_item)
+        assert notepad_item is not None
         self.assertEqual(notepad_item["app_name"], "Notepad")
         self.assertTrue(notepad_item["allowlisted"])
 
         # Calculator should be allowlisted=False
         calc_item = self.orchestrator.get_app_by_id("calculator")
         self.assertIsNotNone(calc_item)
+        assert calc_item is not None
         self.assertFalse(calc_item["allowlisted"])
 
         # Missing app returns None

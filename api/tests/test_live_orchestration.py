@@ -12,6 +12,7 @@ User Command ("Open Notepad")
 
 import sys
 import unittest
+from typing import List
 
 from api.orchestrator import TaskOrchestrator
 from windows_automation.adapter import WindowsAutomationAdapter
@@ -24,7 +25,7 @@ class TestLiveOrchestration(unittest.TestCase):
     def setUp(self):
         self.adapter = WindowsAutomationAdapter()
         self.orchestrator = TaskOrchestrator(adapter=self.adapter)
-        self.actions_to_clean = []
+        self.actions_to_clean: List[str] = []
 
     def tearDown(self):
         # Cancel any actions to ensure no open windows remain

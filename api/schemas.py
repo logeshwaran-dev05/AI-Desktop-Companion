@@ -48,6 +48,10 @@ class TaskProgressResponse(BaseModel):
     current_stage: str
     timeline: List[TimelineEntry] = Field(default_factory=list)
     message: Optional[str] = None
+    intent: Optional[str] = None
+    selected_application: Optional[str] = None
+    application_id: Optional[str] = None
+    structured_request: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -115,11 +119,17 @@ class TaskResultResponse(BaseModel):
     task_id: str
     status: str
     result: Optional[Any] = None
-    message: str
+    message: Optional[str] = ""
     error_code: Optional[str] = None
+    error_message: Optional[str] = None
     verification: Optional[Dict[str, Any]] = None
     audit: Optional[Dict[str, Any]] = None
     duration_ms: Optional[int] = None
+    intent: Optional[str] = None
+    selected_application: Optional[str] = None
+    application_id: Optional[str] = None
+    structured_request: Optional[Dict[str, Any]] = None
+    completed_at: Optional[str] = None
 
 
 class TaskExecuteRequest(BaseModel):
@@ -191,6 +201,18 @@ class TaskSubmitRequest(BaseModel):
     timeout_seconds: float = 10.0
 
 
+class StructuredActionRequest(BaseModel):
+    """
+    Structured action request representing a validated, normalized execution intent
+    ready for dispatch to Windows Automation.
+    """
+    action: str = Field(min_length=1, description="Action to perform, e.g., 'launch_application'")
+    application_id: str = Field(min_length=1, description="Canonical application identifier, e.g., 'chrome', 'vscode'")
+    target: str = Field(min_length=1, description="Target application display name or executable")
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    source: Literal["text", "voice"] = "text"
+
+
 class TaskSubmitResponse(BaseModel):
     """Response returned from unified task submission."""
     task_id: str
@@ -198,6 +220,10 @@ class TaskSubmitResponse(BaseModel):
     command: str
     status: str
     message: str
+    intent: Optional[str] = None
+    selected_application: Optional[str] = None
+    application_id: Optional[str] = None
+    structured_request: Optional[Dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------

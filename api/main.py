@@ -159,6 +159,11 @@ def submit_voice_input(request: VoiceInputRequest):
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         )
+    except VoiceServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
 
     return {
         "task_id": task["task_id"],
@@ -185,6 +190,11 @@ def submit_voice_transcript(request: VoiceTranscriptRequest):
     except DuplicateRequestError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    except VoiceServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         )
 
@@ -220,6 +230,11 @@ def submit_task(request: TaskSubmitRequest):
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         )
+    except VoiceServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
 
     return {
         "task_id": task["task_id"],
@@ -227,6 +242,10 @@ def submit_task(request: TaskSubmitRequest):
         "command": request.command,
         "status": task["status"],
         "message": task["message"],
+        "intent": task.get("intent"),
+        "selected_application": task.get("selected_application"),
+        "application_id": task.get("application_id"),
+        "structured_request": task.get("structured_request"),
     }
 
 
@@ -313,7 +332,7 @@ def get_task_result(task_id: str):
 
     task_status = task.get("status", "pending")
     result_data = task.get("result")
-    message = task.get("message", "Task has not completed yet")
+    message = task.get("message") or "Task has not completed yet"
 
     return {
         "task_id": task_id,
@@ -321,9 +340,15 @@ def get_task_result(task_id: str):
         "result": result_data,
         "message": message,
         "error_code": task.get("error_code"),
+        "error_message": task.get("error_message"),
         "verification": task.get("verification"),
         "audit": task.get("audit"),
         "duration_ms": task.get("duration_ms"),
+        "intent": task.get("intent"),
+        "selected_application": task.get("selected_application"),
+        "application_id": task.get("application_id"),
+        "structured_request": task.get("structured_request"),
+        "completed_at": task.get("completed_at"),
     }
 
 
@@ -355,11 +380,17 @@ def execute_task(task_id: str, request: Optional[TaskExecuteRequest] = None):
         "task_id": task_id,
         "status": updated_task.get("status", "pending"),
         "result": updated_task.get("result"),
-        "message": updated_task.get("message", ""),
+        "message": updated_task.get("message") or "",
         "error_code": updated_task.get("error_code"),
+        "error_message": updated_task.get("error_message"),
         "verification": updated_task.get("verification"),
         "audit": updated_task.get("audit"),
         "duration_ms": updated_task.get("duration_ms"),
+        "intent": updated_task.get("intent"),
+        "selected_application": updated_task.get("selected_application"),
+        "application_id": updated_task.get("application_id"),
+        "structured_request": updated_task.get("structured_request"),
+        "completed_at": updated_task.get("completed_at"),
     }
 
 
@@ -392,11 +423,17 @@ def approve_task(task_id: str, request: Optional[TaskApproveRequest] = None):
         "task_id": task_id,
         "status": updated_task.get("status", "pending"),
         "result": updated_task.get("result"),
-        "message": updated_task.get("message", ""),
+        "message": updated_task.get("message") or "",
         "error_code": updated_task.get("error_code"),
+        "error_message": updated_task.get("error_message"),
         "verification": updated_task.get("verification"),
         "audit": updated_task.get("audit"),
         "duration_ms": updated_task.get("duration_ms"),
+        "intent": updated_task.get("intent"),
+        "selected_application": updated_task.get("selected_application"),
+        "application_id": updated_task.get("application_id"),
+        "structured_request": updated_task.get("structured_request"),
+        "completed_at": updated_task.get("completed_at"),
     }
 
 
@@ -424,7 +461,7 @@ def cancel_task(task_id: str):
         "task_id": task_id,
         "status": updated_task["status"],
         "requires_approval": False,
-        "message": updated_task.get("message"),
+        "message": updated_task.get("message") or "",
     }
 
 
@@ -444,11 +481,17 @@ def run_command(request: CommandRunRequest):
         "task_id": task.get("task_id", ""),
         "status": task.get("status", "pending"),
         "result": task.get("result"),
-        "message": task.get("message", ""),
+        "message": task.get("message") or "",
         "error_code": task.get("error_code"),
+        "error_message": task.get("error_message"),
         "verification": task.get("verification"),
         "audit": task.get("audit"),
         "duration_ms": task.get("duration_ms"),
+        "intent": task.get("intent"),
+        "selected_application": task.get("selected_application"),
+        "application_id": task.get("application_id"),
+        "structured_request": task.get("structured_request"),
+        "completed_at": task.get("completed_at"),
     }
 
 

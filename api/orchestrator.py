@@ -16,14 +16,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import uuid4
 
 from ai_engine.catalogue import get_installed_apps
 from ai_engine.planner.task_planner import TaskPlanner
-from ai_engine.schemas.command_schema import CommandRequest, PlanStep
+from ai_engine.schemas.command_schema import CommandRequest, PlanStep, InputType
+from api.schemas import StructuredActionRequest
 from windows_automation.adapter import WindowsAutomationAdapter
 from windows_automation.schemas import AuthorizationDecision, ExecutionResult
 
@@ -65,6 +65,31 @@ class InvalidIntentError(BackendError):
         super().__init__(message, error_code="ERR_INVALID_INTENT")
 
 
+class InvalidApplicationIdError(BackendError):
+    def __init__(self, message: str = "Invalid application identifier."):
+        super().__init__(message, error_code="ERR_INVALID_APPLICATION_ID")
+
+
+class MissingParametersError(BackendError):
+    def __init__(self, message: str = "Missing required parameters in request."):
+        super().__init__(message, error_code="ERR_MISSING_PARAMETERS")
+
+
+class AutomationUnavailableError(BackendError):
+    def __init__(self, message: str = "Windows Automation service is unavailable."):
+        super().__init__(message, error_code="ERR_AUTOMATION_UNAVAILABLE")
+
+
+class AmbiguousCommandError(BackendError):
+    def __init__(self, message: str = "Command is ambiguous and requires user clarification."):
+        super().__init__(message, error_code="ERR_AMBIGUOUS_COMMAND")
+
+
+class AutomationFailureError(BackendError):
+    def __init__(self, message: str = "Windows Automation execution failed unexpectedly."):
+        super().__init__(message, error_code="ERR_AUTOMATION_FAILURE")
+
+
 # ---------------------------------------------------------------------------
 # Task State Machine
 # ---------------------------------------------------------------------------
@@ -85,7 +110,7 @@ class TaskStateMachine:
     - pending / running / completed: Preserved legacy states for full backward compatibility.
     """
 
-    VALID_TRANSITIONS = {
+    VALID_TRANSITIONS: Dict[str, Set[str]] = {
         # Structured task states (today's specification)
         "listening": {"processing", "failed", "cancelled"},
         "processing": {"matching", "failed", "cancelled"},
@@ -102,7 +127,7 @@ class TaskStateMachine:
         "completed": set(),  # Terminal state
     }
 
-    TERMINAL_STATES = {"completed", "launched", "failed", "cancelled"}
+    TERMINAL_STATES: Set[str] = {"completed", "launched", "failed", "cancelled"}
 
     PROGRESS_MAP = {
         "pending": 0,
@@ -159,9 +184,8 @@ class TaskStateMachine:
             task["message"] = message
 
         # Maintain progress timeline
-        if "timeline" not in task:
-            task["timeline"] = []
-        task["timeline"].append({
+        timeline: List[Dict[str, Any]] = task.setdefault("timeline", [])
+        timeline.append({
             "timestamp": current_iso_timestamp(),
             "state": next_status,
             "message": message or f"Transitioned to {next_status}",
@@ -180,27 +204,79 @@ class ApplicationResolver:
 
     ALIASES = {
         "notepad": "notepad",
+        "notes": "notepad",
+        "text editor": "notepad",
         "calc": "calculator",
         "calculator": "calculator",
+        "math": "calculator",
         "chrome": "chrome",
         "google chrome": "chrome",
+        "google": "chrome",
+        "browser": "chrome",
+        "my browser": "chrome",
+        "web browser": "chrome",
+        "internet": "chrome",
         "code": "vscode",
         "vs code": "vscode",
+        "vscode": "vscode",
         "visual studio code": "vscode",
+        "code editor": "vscode",
+        "my code editor": "vscode",
+        "editor": "vscode",
         "edge": "edge",
         "microsoft edge": "edge",
         "paint": "paint",
+        "drawing": "paint",
     }
+
+    FORBIDDEN_IDENTIFIER_CHARS = {";", "&", "|", ">", "<", "`", "$", "/", "\\", " ", "\n", "\r", "\t", "\0"}
 
     def __init__(self, catalogue: Optional[List[Dict[str, Any]]] = None):
         self.catalogue = catalogue if catalogue is not None else get_installed_apps()
+
+    def is_valid_application_id(self, app_id: Optional[str]) -> bool:
+        """Validate format and characters of an application identifier."""
+        if not app_id or not isinstance(app_id, str):
+            return False
+        clean = app_id.strip()
+        if not clean:
+            return False
+        return not any(ch in clean for ch in self.FORBIDDEN_IDENTIFIER_CHARS)
+
+    def is_ambiguous(self, target: str) -> bool:
+        """Detect ambiguous targets like 'visual studio' that match multiple applications."""
+        clean = (target or "").strip().lower().rstrip("?.!,")
+        return clean in ("visual studio", "vs")
+
+    def validate_structured_request(self, req: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Validate structured execution request parameters before dispatching.
+        Returns: (is_valid, error_code, error_message)
+        """
+        action = req.get("action")
+        if not action or action not in ("open_application", "launch_application"):
+            return False, "ERR_INVALID_INTENT", f"Action '{action}' is not supported."
+
+        app_id = req.get("application_id")
+        if not self.is_valid_application_id(app_id):
+            return False, "ERR_INVALID_APPLICATION_ID", f"Invalid application identifier: '{app_id}'"
+
+        params = req.get("parameters")
+        if params is None or not isinstance(params, dict):
+            return False, "ERR_MISSING_PARAMETERS", "Missing or invalid 'parameters' dictionary in structured request."
+
+        target = req.get("target")
+        if not target or not isinstance(target, str) or not target.strip():
+            return False, "ERR_MISSING_PARAMETERS", "Missing required 'target' parameter in structured request."
+
+        return True, None, None
 
     def resolve(self, target: str) -> Optional[Dict[str, Any]]:
         """
         Resolve an application name or alias to its installed catalogue entry.
         Returns the application dict or None if unknown.
         """
-        clean = (target or "").strip().lower()
+        clean = (target or "").strip().lower().rstrip("?.!,")
         if not clean:
             return None
 
@@ -343,7 +419,7 @@ class TaskOrchestrator:
     def get_catalogue(self) -> List[Dict[str, Any]]:
         """Return the installed application catalogue annotated with allowlist status."""
         apps = get_installed_apps()
-        results = []
+        results: List[Dict[str, Any]] = []
         for app in apps:
             app_id = app.get("app_id", "").lower()
             executable = app.get("executable", "").lower()
@@ -389,6 +465,10 @@ class TaskOrchestrator:
             "current_stage": current_stage,
             "timeline": task.get("timeline", []),
             "message": task.get("message", ""),
+            "intent": task.get("intent"),
+            "selected_application": task.get("selected_application"),
+            "application_id": task.get("application_id"),
+            "structured_request": task.get("structured_request"),
         }
 
     # -----------------------------------------------------------------------
@@ -398,7 +478,7 @@ class TaskOrchestrator:
     def run_pipeline(
         self,
         command: Optional[str] = None,
-        input_type: str = "text",
+        input_type: InputType = "text",
         auto_execute: bool = True,
         idempotency_key: Optional[str] = None,
         timeout_seconds: float = 10.0,
@@ -424,7 +504,7 @@ class TaskOrchestrator:
         task_id = task_id or f"task_{uuid4()}"
         initial_status = "listening" if (input_type == "voice" and not command) else "processing"
 
-        task = {
+        task: Dict[str, Any] = {
             "task_id": task_id,
             "title": command or ("Voice Command" if input_type == "voice" else "Task"),
             "description": "",
@@ -432,6 +512,9 @@ class TaskOrchestrator:
             "input_type": input_type,
             "idempotency_key": idempotency_key,
             "intent": None,
+            "selected_application": None,
+            "application_id": None,
+            "structured_request": None,
             "status": initial_status,
             "steps": [],
             "current_step_index": 0,
@@ -484,48 +567,77 @@ class TaskOrchestrator:
         plan_response = self.planner.process_command(CommandRequest(text=command, input_type=input_type))
         task["intent"] = plan_response.intent
 
-        # Handle unsupported, clarification, or missing steps
-        if plan_response.status in ("clarification_required", "unsupported") or not plan_response.steps:
-            # Check if an unknown application was referenced in an open/launch command
-            clean_cmd = command.lower().strip()
-            is_launch_command = any(
-                clean_cmd.startswith(prefix)
-                for prefix in ("open", "launch", "start", "please open", "can you open", "could you open", "would you open")
-            )
-            app_entity = getattr(plan_response.entities, "application", None)
+        # Step 4.1: Check for Ambiguous Command or Clarification Required
+        clean_cmd = (command or "").strip().lower()
+        is_launch_command = any(
+            clean_cmd.startswith(prefix)
+            for prefix in ("open", "launch", "start", "please open", "can you open", "could you open", "would you open")
+        )
+        app_entity = getattr(plan_response.entities, "application", None)
+        target_candidate = app_entity or (command.split()[-1] if len(command.split()) > 1 else "")
 
+        if (
+            plan_response.status == "clarification_required"
+            or self.resolver.is_ambiguous(target_candidate)
+            or self.resolver.is_ambiguous(command)
+        ):
+            clarification_msg = (
+                plan_response.clarification_question
+                or plan_response.message
+                or f"Command '{command}' is ambiguous. Please specify the exact application."
+            )
+            self.state_machine.transition(task, "failed", clarification_msg)
+            task["error_code"] = "ERR_AMBIGUOUS_COMMAND"
+            task["error_message"] = clarification_msg
+            task["completed_at"] = current_iso_timestamp()
+            return task
+
+        # Step 4.2: Handle Unsupported or Missing Steps with Alternative Phrase / Category Recovery
+        if plan_response.status == "unsupported" or not plan_response.steps:
             if is_launch_command:
-                target_candidate = app_entity or (command.split()[-1] if len(command.split()) > 1 else "")
-                resolved_app = self.resolver.resolve(target_candidate)
-                if not resolved_app and target_candidate and target_candidate.lower() not in ("notepad", "notepad.exe"):
+                # Try category / alternative phrase resolution (e.g. "Can you open my browser?")
+                resolved_app = self.resolver.resolve(target_candidate) or self.resolver.resolve(clean_cmd)
+                if resolved_app:
+                    task["intent"] = "open_application"
+                    task["steps"] = [
+                        {
+                            "step_id": 1,
+                            "action": "open_application",
+                            "target": resolved_app["app_name"],
+                            "depends_on": [],
+                            "expected_outcome": f"{resolved_app['app_name']} should open successfully.",
+                        }
+                    ]
+                else:
                     self.state_machine.transition(task, "failed", f"Unknown application: '{target_candidate}' is not recognized.")
                     task["error_code"] = "ERR_UNKNOWN_APPLICATION"
                     task["error_message"] = f"Application '{target_candidate}' not found in installed catalogue."
                     task["completed_at"] = current_iso_timestamp()
                     return task
+            else:
+                self.state_machine.transition(task, "failed", plan_response.message or "Invalid or unsupported command intent.")
+                task["error_code"] = "ERR_INVALID_INTENT"
+                task["error_message"] = plan_response.message or "Planner could not extract an actionable intent."
+                task["completed_at"] = current_iso_timestamp()
+                return task
+        else:
+            task["steps"] = [
+                {
+                    "step_id": step.step_id,
+                    "action": step.action,
+                    "target": step.target,
+                    "depends_on": getattr(step, "depends_on", []),
+                    "expected_outcome": step.expected_outcome,
+                }
+                for step in plan_response.steps
+            ]
 
-            self.state_machine.transition(task, "failed", plan_response.message or "Invalid or unsupported command intent.")
-            task["error_code"] = "ERR_INVALID_INTENT"
-            task["error_message"] = plan_response.message or "Planner could not extract an actionable intent."
-            task["completed_at"] = current_iso_timestamp()
-            return task
-
-        task["steps"] = [
-            {
-                "step_id": step.step_id,
-                "action": step.action,
-                "target": step.target,
-                "depends_on": getattr(step, "depends_on", []),
-                "expected_outcome": step.expected_outcome,
-            }
-            for step in plan_response.steps
-        ]
-
-        # Step 5: Application Identifier Resolution & Matching
+        # Step 5: Application Identifier Resolution & Structured Request Generation
         self.state_machine.transition(task, "matching", "Resolving target application against installed catalogue.")
-        step_data = task["steps"][0]
-        action_name = step_data.get("action", "")
-        raw_target = step_data.get("target", "")
+        steps_list: List[Dict[str, Any]] = task["steps"]
+        step_data = steps_list[0]
+        action_name = str(step_data.get("action", ""))
+        raw_target = str(step_data.get("target", ""))
 
         resolved_app = self.resolver.resolve(raw_target)
         if not resolved_app and raw_target.lower() not in ("notepad", "notepad.exe"):
@@ -535,8 +647,30 @@ class TaskOrchestrator:
             task["completed_at"] = current_iso_timestamp()
             return task
 
-        canonical_target = resolved_app["app_name"] if resolved_app else raw_target
+        canonical_target = str(resolved_app["app_name"]) if resolved_app else raw_target
+        app_id = str(resolved_app.get("app_id", "notepad")) if resolved_app else ("notepad" if raw_target.lower().startswith("notepad") else raw_target.lower())
         step_data["target"] = canonical_target
+
+        task["selected_application"] = canonical_target
+        task["application_id"] = app_id
+
+        # Generate StructuredActionRequest
+        structured_req = StructuredActionRequest(
+            action="launch_application",
+            application_id=app_id,
+            target=canonical_target,
+            parameters={},
+            source=input_type,
+        )
+        task["structured_request"] = structured_req.model_dump()
+
+        is_valid, val_err_code, val_err_msg = self.resolver.validate_structured_request(task["structured_request"])
+        if not is_valid:
+            self.state_machine.transition(task, "failed", val_err_msg or "Invalid structured request.")
+            task["error_code"] = val_err_code or "ERR_INVALID_REQUEST"
+            task["error_message"] = val_err_msg
+            task["completed_at"] = current_iso_timestamp()
+            return task
 
         if not auto_execute:
             return task
@@ -556,6 +690,14 @@ class TaskOrchestrator:
             task["completed_at"] = current_iso_timestamp()
             return task
 
+        # Automation service availability check
+        if self.adapter is None:
+            self.state_machine.transition(task, "failed", "Windows Automation service is unavailable.")
+            task["error_code"] = "ERR_AUTOMATION_UNAVAILABLE"
+            task["error_message"] = "Windows Automation service is offline or unreachable."
+            task["completed_at"] = current_iso_timestamp()
+            return task
+
         # Step 7: Windows Automation Dispatch (launching)
         self.state_machine.transition(
             task, "launching", f"Dispatching '{action_name}' on '{canonical_target}' to Windows Automation."
@@ -569,12 +711,20 @@ class TaskOrchestrator:
             expected_outcome=step_data.get("expected_outcome", ""),
         )
 
-        exec_result: ExecutionResult = self.adapter.execute_plan_step(
-            step=plan_step,
-            task_id=task_id,
-            authorization=auth,
-            timeout_seconds=timeout_seconds,
-        )
+        try:
+            exec_result: ExecutionResult = self.adapter.execute_plan_step(
+                step=plan_step,
+                task_id=task_id,
+                authorization=auth,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception as exc:
+            self.state_machine.transition(task, "failed", f"Windows Automation execution failure: {str(exc)}")
+            task["active_action_id"] = None
+            task["error_code"] = "ERR_AUTOMATION_FAILURE"
+            task["error_message"] = str(exc)
+            task["completed_at"] = current_iso_timestamp()
+            return task
 
         task["active_action_id"] = exec_result.action_id
         task["duration_ms"] = exec_result.duration_ms
@@ -593,6 +743,8 @@ class TaskOrchestrator:
             )
             task["active_action_id"] = None
             task["message"] = f"Application '{canonical_target}' launched and verified successfully."
+            task["error_code"] = None
+            task["error_message"] = None
 
         elif exec_result.status == "cancelled":
             self.state_machine.transition(task, "cancelled", "Action was cancelled.")
@@ -665,7 +817,7 @@ class TaskOrchestrator:
                 initial_status = "failed"
                 message = plan_response.message
 
-        task = {
+        task: Dict[str, Any] = {
             "task_id": task_id,
             "title": title,
             "description": description,
@@ -817,7 +969,7 @@ class TaskOrchestrator:
             )
 
         ref = approval_reference or f"user_approval_{uuid4().hex[:8]}"
-        auth_data = task.get("authorization") or {}
+        auth_data: Dict[str, Any] = dict(task.get("authorization") or {})
         auth_data["permission_status"] = "granted"
         auth_data["requires_user_approval"] = True
         auth_data["approval_reference"] = ref

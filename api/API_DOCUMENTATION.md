@@ -45,6 +45,10 @@ $$\text{User Input (Text / Voice)} \longrightarrow \text{Voice/Text Processing} 
 | `ERR_DUPLICATE_REQUEST` | 409 Conflict | Request with identical idempotency key already exists. |
 | `ERR_VOICE_SERVICE_UNAVAILABLE` | 503 Unavailable | Microphone or voice transcription service is offline. |
 | `ERR_UNKNOWN_APPLICATION` | 404 / 422 | Requested target is not in the installed catalogue or allowlist. |
+| `ERR_INVALID_APPLICATION_ID` | 422 Unprocessable | Application identifier missing, empty, or contains forbidden characters. |
+| `ERR_MISSING_PARAMETERS` | 422 Unprocessable | Required action parameter or target is missing. |
+| `ERR_AMBIGUOUS_COMMAND` | 422 Unprocessable | Command matches multiple installed applications; clarification required. |
+| `ERR_AUTOMATION_UNAVAILABLE` | 503 Unavailable | Windows Automation service or adapter is offline or unreachable. |
 | `ERR_LAUNCH_FAILED` | 500 / Task Result | Subprocess spawn failed or executable missing. |
 | `ERR_VERIFICATION_FAILED` | 500 / Task Result | Process spawned, but Win32 window was never verified. |
 | `ERR_AUTOMATION_FAILURE` | 500 / Task Result | Windows Automation raised an unexpected OS error. |
@@ -268,14 +272,18 @@ $$\text{User Input (Text / Voice)} \longrightarrow \text{Voice/Text Processing} 
 
 ### Start Server
 ```powershell
-python api/main.py
+# Using the workspace virtual environment
+.\.venv\Scripts\python.exe api/main.py
 ```
 *(Runs on `http://127.0.0.1:8000` with interactive Swagger docs at `http://127.0.0.1:8000/docs`).*
 
 ### Run Integration & Unit Tests
 ```powershell
-# Run all tests in the workspace (78 tests)
+# Run all tests in the workspace (92 tests)
 python -m unittest discover -s . -p "test_*.py"
+
+# Run Priority 3 AI Intent + Windows Automation Integration tests (14 tests)
+python -m unittest api/tests/test_priority3_integration.py
 
 # Run Common Pipeline Integration tests
 python -m unittest api/tests/test_common_pipeline.py
