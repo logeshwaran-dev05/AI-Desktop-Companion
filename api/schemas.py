@@ -17,11 +17,17 @@ from pydantic import BaseModel, Field
 TaskState = Literal[
     "listening",
     "processing",
+    "understanding",
     "matching",
     "launching",
+    "executing",
     "launched",
+    "verifying",
     "failed",
     "requires_approval",
+    "awaiting_approval",
+    "waiting_approval",   # Alias accepted by API consumers; maps to requires_approval internally
+    "timed_out",          # Alias for failed due to timeout; returned in result.error_code == ERR_TIMEOUT
     "cancelled",
     "pending",
     "running",

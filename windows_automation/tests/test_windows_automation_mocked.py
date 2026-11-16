@@ -15,7 +15,7 @@ Covers the 10 core safety and behavior scenarios:
 """
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from windows_automation.schemas import (
     ActionRequest,
     AuthorizationDecision,
@@ -316,6 +316,43 @@ class TestWindowsAutomationMocked(unittest.TestCase):
         # Bearer token substring in summary should be redacted
         self.assertNotIn("super_secret_token_12345", record.redacted_summary)
         self.assertIn("[REDACTED_CREDENTIAL]", record.redacted_summary)
+
+    # 11. URI launch uses os.startfile and succeeds without a direct process handle
+    def test_11_settings_uri_launch_uses_startfile(self):
+        policy = WindowsActionPolicy()
+        policy.load_catalogue_entries([
+            {
+                "app_id": "settings",
+                "app_name": "Windows Settings",
+                "executable": "ms-settings:",
+                "launch_target": "ms-settings:",
+                "launch_type": "uri",
+                "application_type": "uri",
+                "launch_method": "os.startfile",
+                "allowlisted": False,
+            }
+        ])
+
+        executor = WindowsAutomationExecutor(
+            policy=policy,
+            audit_logger=self.audit_logger,
+            subprocess_runner=MagicMock(),
+        )
+
+        req = self._create_authorized_request(
+            action_name="open_application",
+            target="Windows Settings",
+            action_id="act-uri",
+            task_id="task-uri",
+            idempotency_key="uri-test-key",
+        )
+
+        with patch("os.startfile") as mock_startfile:
+            result = executor.execute(req)
+
+        self.assertEqual(result.status, "completed")
+        self.assertTrue(result.verification.verified)
+        mock_startfile.assert_called_once_with("ms-settings:")
 
 
 if __name__ == "__main__":

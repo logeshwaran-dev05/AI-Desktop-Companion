@@ -98,7 +98,44 @@ python -m unittest discover -s windows_automation/tests
 
 ---
 
-## 6. Known Limitations & Future Work
+## 6. Dynamic App Discovery & Launch Validation (Current Stage)
 
-- **Scope:** Milestone 1 is intentionally scoped to `"open_application"` with `"Notepad"`. Browser automation, shell scripts, and keyboard/mouse injection are intentionally disabled until team review.
+This repository now includes a safe discovery layer for Windows applications before any deeper Settings or in-app automation work begins.
+
+### Discovery sources covered
+- Start Menu shortcuts under the common user/program-data folders
+- Windows Registry `App Paths` entries under `HKLM` and `HKCU`
+- Disposable packaged app discovery via the Shell `AppsFolder` namespace when available
+- Built-in safety catalogue entries for common Windows apps and Settings pages
+
+### Validation checklist
+Run the following from a Windows shell after starting the backend:
+
+```powershell
+python -m unittest api.tests.test_backend_orchestrator -v
+python -m unittest api.tests.test_app_catalogue_orchestration -v
+```
+
+Then verify the dynamic catalogue from Python:
+
+```powershell
+python -c "from api.app_catalogue import catalogue_service; apps=catalogue_service.discover_applications(); print(len(apps)); print([a['app_id'] for a in apps[:10]])"
+```
+
+### Manual launch smoke test
+Use a safe local application such as Notepad or Calculator:
+
+```powershell
+python -c "from windows_automation.schemas import ActionRequest, AuthorizationDecision; from windows_automation.executor import WindowsAutomationExecutor; from windows_automation.verifier import WindowsWindowVerifier; auth=AuthorizationDecision(decision_id='dec-manual', permission_status='granted', approval_reference='manual-check'); req=ActionRequest(action_id='act-manual', task_id='task-manual', action_name='open_application', target='Notepad', authorization=auth, timeout_seconds=5.0); print(WindowsAutomationExecutor(verifier=WindowsWindowVerifier()).execute(req).status)"
+```
+
+### Expected behavior
+- Duplicate app entries are coalesced into one canonical record.
+- Unknown or invalid executable paths are rejected.
+- Unavailable apps do not crash discovery and are omitted unless they are obviously valid.
+- Failed launches are reported as `ERR_LAUNCH_FAILED` and are not reported as completed success.
+
+## 7. Known Limitations & Future Work
+
+- **Scope:** This stage is intentionally limited to dynamic discovery and launch verification. Browser automation, shell scripts, keyboard/mouse injection, Windows Settings navigation, and advanced in-app task execution remain intentionally out of scope until the next stage.
 - **Contract Agreement:** Pending final review of `shared/TEAM_CONTRACTS.md` with Vinay Vighnesh S (Desktop Integration Lead) and Hariram K S (Backend API Owner).

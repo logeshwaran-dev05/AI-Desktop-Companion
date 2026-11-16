@@ -6,12 +6,15 @@ import unittest
 from typing import Any, Dict
 from unittest.mock import MagicMock
 
+from api.app_catalogue import WindowsApplicationCatalogue
 from api.orchestrator import (
     PermissionEvaluator,
     TaskOrchestrator,
     TaskStateMachine,
 )
+from windows_automation.policy import WindowsActionPolicy
 from windows_automation.schemas import (
+    ActionRequest,
     AuditRecord,
     ExecutionResult,
     VerificationEvidence,
@@ -51,6 +54,21 @@ class TestTaskStateMachine(unittest.TestCase):
         TaskStateMachine.transition(task5, "failed")
         self.assertEqual(task5["status"], "failed")
 
+    def test_alias_states_are_accepted(self):
+        task = {"status": "pending"}
+        TaskStateMachine.transition(task, "understanding")
+        self.assertEqual(task["status"], "understanding")
+        self.assertTrue(TaskStateMachine.can_transition("understanding", "matching"))
+
+        approval_task = {"status": "pending"}
+        TaskStateMachine.transition(approval_task, "awaiting_approval")
+        self.assertEqual(approval_task["status"], "awaiting_approval")
+        self.assertTrue(TaskStateMachine.can_transition("awaiting_approval", "launching"))
+
+        timed_task = {"status": "launching"}
+        TaskStateMachine.transition(timed_task, "timed_out")
+        self.assertEqual(timed_task["status"], "timed_out")
+
     def test_invalid_transitions_raise_value_error(self):
         # Direct jump pending -> completed (must go through running)
         task = {"status": "pending"}
@@ -71,6 +89,51 @@ class TestTaskStateMachine(unittest.TestCase):
         cancelled_task = {"status": "cancelled"}
         with self.assertRaises(ValueError):
             TaskStateMachine.transition(cancelled_task, "running")
+
+    def test_catalogue_refresh_rebuilds_known_applications(self):
+        catalogue = WindowsApplicationCatalogue(enable_live_scan=False)
+        refreshed = catalogue.refresh_catalogue()
+        self.assertIsInstance(refreshed, list)
+        self.assertGreaterEqual(len(refreshed), 10)
+        self.assertIsNotNone(catalogue.get_app("settings"))
+        self.assertIsNotNone(catalogue.get_app("chrome"))
+
+    def test_dynamic_policy_registration_allows_discovered_application(self):
+        policy = WindowsActionPolicy()
+        policy.register_application(
+            app_id="chrome",
+            canonical_name="Google Chrome",
+            executable_name="chrome.exe",
+            known_paths=["chrome.exe"],
+        )
+
+        request = ActionRequest(
+            action_id="act-dynamic",
+            task_id="task-dynamic",
+            action_name="open_application",
+            target="Google Chrome",
+            authorization=None,
+        )
+        is_valid, err_code, err_msg = policy.validate_request(request)
+        self.assertTrue(is_valid, msg=err_msg)
+        self.assertEqual(err_code, None)
+        self.assertEqual(policy.resolve_executable_path("Google Chrome"), "chrome.exe")
+
+    def test_policy_loads_dynamic_catalogue_entries(self):
+        policy = WindowsActionPolicy()
+        policy.load_catalogue_entries([
+            {
+                "app_id": "githubdesktop",
+                "app_name": "GitHub Desktop",
+                "executable": "GitHubDesktop.exe",
+                "launch_target": "GitHubDesktop.exe",
+                "launch_type": "executable",
+                "allowlisted": False,
+            }
+        ])
+
+        self.assertIn("githubdesktop", policy.ALLOWLISTED_APPLICATIONS)
+        self.assertEqual(policy.resolve_executable_path("GitHub Desktop"), "GitHubDesktop.exe")
 
 
 class TestPermissionEvaluator(unittest.TestCase):

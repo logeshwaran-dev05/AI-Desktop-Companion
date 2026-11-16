@@ -23,6 +23,7 @@ from uuid import uuid4
 from ai_engine.catalogue import get_installed_apps
 from ai_engine.planner.task_planner import TaskPlanner
 from ai_engine.schemas.command_schema import CommandRequest, PlanStep, InputType
+from api.app_catalogue import catalogue_service as _windows_catalogue
 from api.schemas import StructuredActionRequest
 from windows_automation.adapter import WindowsAutomationAdapter
 from windows_automation.schemas import AuthorizationDecision, ExecutionResult
@@ -97,18 +98,21 @@ class AutomationFailureError(BackendError):
 class TaskStateMachine:
     """
     Deterministic Task State Machine.
-    
-    States:
-    - listening: Waiting for / receiving voice input audio.
-    - processing: Transcribing audio or parsing intent via AI Engine.
-    - matching: Resolving application identifiers against installed catalogue.
-    - requires_approval: Action requires explicit human confirmation.
-    - launching: Dispatched to Windows Automation and polling Win32 verification.
-    - launched: Action executed and positively verified by Windows Automation verifier.
-    - failed: Validation, policy check, launch, or verification failed.
-    - cancelled: Execution aborted by user request or timeout.
-    - pending / running / completed: Preserved legacy states for full backward compatibility.
+
+    The project historically uses a legacy subset of states (pending/running/completed),
+    while the broader Windows automation specification also expects aliases such as
+    understanding, awaiting_approval, executing, verifying, and timed_out. These are
+    normalized so the backend accepts both forms without changing the existing behavior.
     """
+
+    STATUS_ALIASES: Dict[str, str] = {
+        "understanding": "processing",
+        "awaiting_approval": "requires_approval",
+        "executing": "launching",
+        "verifying": "launched",
+        "timed_out": "failed",
+        "waiting_approval": "requires_approval",
+    }
 
     VALID_TRANSITIONS: Dict[str, Set[str]] = {
         # Structured task states (today's specification)
@@ -121,47 +125,73 @@ class TaskStateMachine:
         "failed": set(),     # Terminal state
         "cancelled": set(),  # Terminal state
 
+        # Spec aliases that normalize to the canonical state names above
+        "understanding": {"matching", "failed", "cancelled"},
+        "awaiting_approval": {"launching", "running", "failed", "cancelled"},
+        "executing": {"launched", "completed", "failed", "cancelled"},
+        "verifying": {"completed", "failed", "cancelled"},
+        "timed_out": set(),
+
         # Preserved states for backward compatibility with existing tests
         "pending": {"running", "requires_approval", "cancelled", "failed", "processing", "matching", "launching"},
         "running": {"completed", "launched", "failed", "cancelled"},
         "completed": set(),  # Terminal state
     }
 
-    TERMINAL_STATES: Set[str] = {"completed", "launched", "failed", "cancelled"}
+    TERMINAL_STATES: Set[str] = {"completed", "launched", "failed", "cancelled", "timed_out"}
 
     PROGRESS_MAP = {
         "pending": 0,
         "listening": 10,
         "processing": 30,
+        "understanding": 30,
         "matching": 50,
         "requires_approval": 50,
+        "awaiting_approval": 50,
         "launching": 75,
+        "executing": 75,
         "running": 75,
         "launched": 100,
+        "verifying": 100,
         "completed": 100,
         "failed": 100,
+        "timed_out": 100,
         "cancelled": 100,
     }
 
     STAGE_DESCRIPTIONS = {
         "listening": "Listening for voice input audio",
         "processing": "Processing input and extracting intent via AI Planner",
+        "understanding": "Understanding the user's intent and target action",
         "matching": "Matching and resolving application identifiers in catalogue",
         "requires_approval": "Awaiting user approval before launching",
+        "awaiting_approval": "Awaiting explicit user approval before launching",
         "launching": "Dispatching launch to Windows Automation",
+        "executing": "Executing the user-approved automation step",
         "running": "Automation in progress",
         "launched": "Application launched and verified on desktop",
+        "verifying": "Verifying the task result against desktop evidence",
         "completed": "Task completed and verified",
         "failed": "Task execution failed",
+        "timed_out": "Task execution timed out",
         "cancelled": "Task execution was cancelled",
         "pending": "Task pending evaluation",
     }
 
     @classmethod
+    def normalize_status(cls, status: Optional[str]) -> Optional[str]:
+        """Normalize spec aliases back to the canonical internal state names."""
+        if not status:
+            return status
+        return cls.STATUS_ALIASES.get(status, status)
+
+    @classmethod
     def can_transition(cls, current_status: str, next_status: str) -> bool:
         """Check whether a state transition is permitted."""
-        allowed = cls.VALID_TRANSITIONS.get(current_status, set())
-        return next_status in allowed
+        current_norm = cls.normalize_status(current_status)
+        next_norm = cls.normalize_status(next_status)
+        allowed = cls.VALID_TRANSITIONS.get(current_norm, set())
+        return next_norm in allowed
 
     @classmethod
     def transition(cls, task: Dict[str, Any], next_status: str, message: Optional[str] = None) -> None:
@@ -170,20 +200,25 @@ class TaskStateMachine:
         Raises ValueError if the transition is invalid.
         """
         current_status = task.get("status", "pending")
-        if current_status == next_status:
+        current_norm = cls.normalize_status(current_status)
+        next_norm = cls.normalize_status(next_status)
+
+        if current_norm == next_norm:
+            task["status"] = next_status
+            if message:
+                task["message"] = message
             return
 
         if not cls.can_transition(current_status, next_status):
             raise ValueError(
                 f"Invalid task state transition from '{current_status}' to '{next_status}'. "
-                f"Allowed target states: {sorted(list(cls.VALID_TRANSITIONS.get(current_status, set())))}"
+                f"Allowed target states: {sorted(list(cls.VALID_TRANSITIONS.get(current_norm, set())))}"
             )
 
         task["status"] = next_status
         if message:
             task["message"] = message
 
-        # Maintain progress timeline
         timeline: List[Dict[str, Any]] = task.setdefault("timeline", [])
         timeline.append({
             "timestamp": current_iso_timestamp(),
@@ -244,9 +279,17 @@ class ApplicationResolver:
         return not any(ch in clean for ch in self.FORBIDDEN_IDENTIFIER_CHARS)
 
     def is_ambiguous(self, target: str) -> bool:
-        """Detect ambiguous targets like 'visual studio' that match multiple applications."""
+        """
+        Detect ambiguous targets that match multiple installed applications.
+        Uses both static check and the Windows Application Catalogue.
+        """
         clean = (target or "").strip().lower().rstrip("?.!,")
-        return clean in ("visual studio", "vs")
+        # Static check: "visual studio" or "vs" match both VS Code and VS 2022
+        if clean in ("visual studio", "vs"):
+            return True
+        # Dynamic check via Windows Application Catalogue
+        is_amb, _ = _windows_catalogue.is_ambiguous(clean)
+        return is_amb
 
     def validate_structured_request(self, req: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[str]]:
         """
@@ -274,13 +317,18 @@ class ApplicationResolver:
     def resolve(self, target: str) -> Optional[Dict[str, Any]]:
         """
         Resolve an application name or alias to its installed catalogue entry.
-        Returns the application dict or None if unknown.
+
+        Resolution order:
+        1. AI Engine catalogue (direct name/id/executable match)
+        2. Static ALIASES map
+        3. Windows Application Catalogue (new dynamic catalogue with Settings URIs)
+        4. Notepad hardcoded fallback
         """
         clean = (target or "").strip().lower().rstrip("?.!,")
         if not clean:
             return None
 
-        # 1. Direct check against catalogue by app_name, app_id, or executable
+        # 1. Direct check against AI Engine catalogue by app_name, app_id, or executable
         for app in self.catalogue:
             if clean in (
                 app["app_name"].lower(),
@@ -290,14 +338,26 @@ class ApplicationResolver:
             ):
                 return app
 
-        # 2. Check aliases
+        # 2. Check static ALIASES map
         if clean in self.ALIASES:
             aliased_id = self.ALIASES[clean]
             for app in self.catalogue:
                 if app["app_id"] == aliased_id:
                     return app
 
-        # 3. Known allowlisted fallback for Notepad
+        # 3. Windows Application Catalogue (dynamic — covers Settings pages, built-ins, third-party)
+        catalogue_entry = _windows_catalogue.resolve_phrase(target)
+        if catalogue_entry:
+            return {
+                "app_name": catalogue_entry["app_name"],
+                "app_id": catalogue_entry["app_id"],
+                "executable": catalogue_entry["executable"],
+                "launch_target": catalogue_entry.get("launch_target", catalogue_entry["executable"]),
+                "launch_type": catalogue_entry.get("launch_type", "executable"),
+                "allowlisted": catalogue_entry.get("allowlisted", False),
+            }
+
+        # 4. Hardcoded fallback for Notepad (always allowlisted)
         if clean in ("notepad", "notepad.exe"):
             return {
                 "app_name": "Notepad",
