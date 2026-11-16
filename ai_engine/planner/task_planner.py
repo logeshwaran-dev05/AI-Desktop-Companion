@@ -14,6 +14,11 @@ from ai_engine.catalogue import get_installed_apps
 
 class TaskPlanner:
 
+    @staticmethod
+    def normalize(value):
+        """Normalize names for application matching."""
+        return re.sub(r"\s+", "", value.lower().strip())
+
     def process_command(self, request: CommandRequest) -> PlannerResponse:
 
         # Step 1: Normalize input
@@ -89,9 +94,7 @@ class TaskPlanner:
         if not installed_apps:
             return PlannerResponse(
                 intent="open_application",
-                entities=CommandEntities(
-                    application=application
-                ),
+                entities=CommandEntities(application=application),
                 steps=[],
                 requires_clarification=False,
                 clarification_question=None,
@@ -99,38 +102,32 @@ class TaskPlanner:
                 message="No installed applications are available."
             )
 
-        # Step 7: Normalize requested application name
-        requested_name = application.replace(" ", "").lower()
-
-        # Step 8: Calculate matching confidence
+        # Step 7: Match application names, IDs and aliases
+        requested_name = self.normalize(application)
         matches = []
 
         for app in installed_apps:
+            candidates = [
+                app["app_name"],
+                app["app_id"],
+                *app.get("aliases", [])
+            ]
 
-            app_name = app["app_name"]
-            app_id = app["app_id"]
+            scores = [
+                SequenceMatcher(
+                    None,
+                    requested_name,
+                    self.normalize(candidate)
+                ).ratio()
+                for candidate in candidates
+            ]
 
-            normalized_name = app_name.replace(" ", "").lower()
-            normalized_id = app_id.replace(" ", "").lower()
+            confidence = max(scores)
 
-            name_score = SequenceMatcher(
-                None,
-                requested_name,
-                normalized_name
-            ).ratio()
-
-            id_score = SequenceMatcher(
-                None,
-                requested_name,
-                normalized_id
-            ).ratio()
-
-            confidence = max(name_score, id_score)
-
-            # Exact match
-            if requested_name in (
-                normalized_name,
-                normalized_id
+            # Exact name, ID or alias match
+            if any(
+                requested_name == self.normalize(candidate)
+                for candidate in candidates
             ):
                 confidence = 1.0
 
@@ -139,7 +136,7 @@ class TaskPlanner:
                 "confidence": confidence
             })
 
-        # Step 9: Sort matches by confidence
+        # Step 8: Sort by confidence
         matches.sort(
             key=lambda item: item["confidence"],
             reverse=True
@@ -148,40 +145,21 @@ class TaskPlanner:
         best_match = matches[0]
         best_confidence = best_match["confidence"]
 
-        # Step 10: Detect multiple related application matches
-        related_matches = [
-            item for item in matches
-            if (
-                requested_name in (
-                    item["app"]["app_name"].replace(" ", "").lower()
-                )
-                or requested_name in (
-                    item["app"]["app_id"].replace(" ", "").lower()
-                )
-            )
-        ]
-
         possible_matches = [
             item for item in matches
             if item["confidence"] >= 0.65
         ]
 
-        ambiguous_matches = []
-
-        if len(related_matches) > 1:
-            ambiguous_matches = related_matches
-
-        elif (
+        # Step 9: Detect genuinely close matches
+        if (
             len(possible_matches) > 1
-            and possible_matches[1]["confidence"] >= best_confidence - 0.10
+            and possible_matches[1]["confidence"]
+            >= best_confidence - 0.10
         ):
-            ambiguous_matches = possible_matches
-
-        if ambiguous_matches:
-
             app_names = [
                 item["app"]["app_name"]
-                for item in ambiguous_matches
+                for item in possible_matches
+                if item["confidence"] >= best_confidence - 0.10
             ]
 
             return PlannerResponse(
@@ -199,9 +177,8 @@ class TaskPlanner:
                 message="Multiple application matches found."
             )
 
-        # Step 11: Accept high-confidence match
+        # Step 10: Accept high-confidence match
         if best_confidence >= 0.85:
-
             selected_app = best_match["app"]
             application_name = selected_app["app_name"]
 
@@ -229,16 +206,13 @@ class TaskPlanner:
                 )
             )
 
-        # Step 12: Ask clarification for medium confidence
-        elif best_confidence >= 0.65:
-
+        # Step 11: Ask clarification for medium confidence
+        if best_confidence >= 0.65:
             suggested_app = best_match["app"]["app_name"]
 
             return PlannerResponse(
                 intent="open_application",
-                entities=CommandEntities(
-                    application=application
-                ),
+                entities=CommandEntities(application=application),
                 steps=[],
                 requires_clarification=True,
                 clarification_question=(
@@ -248,17 +222,13 @@ class TaskPlanner:
                 message="Application name is uncertain."
             )
 
-        # Step 13: Reject low-confidence match
+        # Step 12: Reject low-confidence match
         return PlannerResponse(
             intent="open_application",
-            entities=CommandEntities(
-                application=application
-            ),
+            entities=CommandEntities(application=application),
             steps=[],
             requires_clarification=False,
             clarification_question=None,
             status="unsupported",
-            message=(
-                f"{application} is not currently available."
-            )
+            message=f"{application} is not currently available."
         )
