@@ -14,4 +14,3 @@ public class WinInput {
 "@
 [WinInput]::TriggerVoiceTyping()
 Write-Output "Win+H triggered successfully"
-

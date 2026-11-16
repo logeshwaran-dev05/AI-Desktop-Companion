@@ -38,6 +38,7 @@ export interface CompanionSyncData {
   facing?: 'left' | 'right';
   taskState?: string;
   isMoving?: boolean;
+  chatboxOpen?: boolean;
 }
 
 export interface CompanionAPI {
@@ -57,6 +58,7 @@ export interface CompanionAPI {
   setExecutionMode: (mode: 'real' | 'mock') => Promise<'real' | 'mock'>;
   getExecutionMode: () => Promise<'real' | 'mock'>;
   triggerVoiceTyping?: () => Promise<boolean>;
+  setChatboxOpen?: (isOpen: boolean) => Promise<boolean>;
 
   onTaskProgress: (callback: (data: any) => void) => () => void;
   onMovementProgress: (callback: (data: MovementStep) => void) => () => void;
