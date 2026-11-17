@@ -42,10 +42,16 @@ Each team member has a specific interface contract. Below are the exact instruct
 ### 👨‍💻 Contract 1: Madhan M (Frontend & Animations Lead)
 
 * **Files Owned:**
-  * `desktop/src/AvatarCharacter.tsx`
-  * `desktop/src/avatarAnimations.css`
-  * `desktop/src/App.tsx`
-  * `desktop/src/launchStateMachine.ts`
+  * `desktop/src/AvatarCharacter.tsx` (Doraemon animations & expressions)
+  * `desktop/src/avatarAnimations.css` (CSS keyframes & particle effects)
+  * `desktop/src/App.tsx` (Mission Control & desktop state)
+  * `desktop/src/launchStateMachine.ts` (Client intent resolver)
+* **Setup / Fetch Latest Code:**
+  ```powershell
+  git remote set-url origin https://github.com/logeshwaran-dev05/AI-Desktop-Companion.git
+  git fetch origin
+  git checkout -b feature/frontend-taskbar-docking origin/main
+  ```
 * **Task Objective:**
   1. Add a **"Taskbar Docking" visual mode**: When the companion is idle or seated, render Doraemon sitting or walking directly atop the bottom taskbar.
   2. Implement reactive expressions matching the backend task state:
@@ -59,16 +65,18 @@ Each team member has a specific interface contract. Below are the exact instruct
   npm --prefix desktop run build
   ```
 
-> 📋 **Prompt for Madhan to paste in his IDE:**
+> 📋 **Copy-Paste Prompt for Madhan:**
 > ```text
-> You are working on the AI Desktop Companion frontend (desktop/src/AvatarCharacter.tsx, desktop/src/App.tsx).
+> Context: You are working on the AI Desktop Companion frontend (desktop/src/AvatarCharacter.tsx, desktop/src/App.tsx).
+> Repo: https://github.com/logeshwaran-dev05/AI-Desktop-Companion
+> 
 > Task:
-> 1. Polish the Doraemon avatar animations for the taskbar docking state:
->    - Ensure the avatar smoothly transitions between states: 'idle', 'walking', 'listening', 'thinking', 'success', 'error'.
->    - In 'listening' state, show subtle soundwave particles or ear glow.
->    - In 'success' state, show a celebratory bounce.
+> 1. In desktop/src/AvatarCharacter.tsx, polish Doraemon's animations for the taskbar docking mode:
+>    - Ensure smooth transitions across states: 'idle', 'walking', 'listening', 'thinking', 'success', 'error'.
+>    - In 'listening' state, render subtle soundwave particles around Doraemon's ears.
+>    - In 'success' state, show a celebratory bounce/stars.
 > 2. Ensure desktop/src/launchStateMachine.ts maps 'youtube', 'spotify', 'netflix', 'chatgpt', 'github', 'gmail', 'notepad', 'calculator', 'explorer' into valid application intents.
-> 3. Verify that running `npm run build` inside desktop/ passes without any TypeScript errors.
+> 3. Verify that running `npm run build` inside desktop/ passes with 0 TypeScript errors.
 > ```
 
 ---
@@ -76,10 +84,16 @@ Each team member has a specific interface contract. Below are the exact instruct
 ### 👨‍💻 Contract 2: Hariram K S / Ram (Senior Backend Orchestrator)
 
 * **Files Owned:**
-  * `api/main.py`
-  * `api/orchestrator.py`
-  * `api/schemas.py`
-  * `api/app_catalogue.py`
+  * `api/main.py` (FastAPI router & lifecycle)
+  * `api/orchestrator.py` (Task execution pipeline)
+  * `api/schemas.py` (Request/Response DTOs)
+  * `api/app_catalogue.py` (Backend registry)
+* **Setup / Fetch Latest Code:**
+  ```powershell
+  git remote set-url origin https://github.com/logeshwaran-dev05/AI-Desktop-Companion.git
+  git fetch origin
+  git checkout -b feature/backend-orchestrator-integration origin/main
+  ```
 * **Task Objective:**
   1. Wire the `/tasks` endpoint in `api/main.py` directly to the `windows_automation` adapter.
   2. Maintain deterministic status updates:
@@ -99,17 +113,19 @@ Each team member has a specific interface contract. Below are the exact instruct
   python -m unittest api/tests/test_api_endpoints.py
   ```
 
-> 📋 **Prompt for Ram to paste in his IDE:**
+> 📋 **Copy-Paste Prompt for Ram:**
 > ```text
-> You are working on the AI Desktop Companion backend API (api/main.py, api/orchestrator.py).
+> Context: You are working on the AI Desktop Companion backend API (api/main.py, api/orchestrator.py).
+> Repo: https://github.com/logeshwaran-dev05/AI-Desktop-Companion
+> 
 > Task:
-> 1. Connect the task orchestrator in api/orchestrator.py to windows_automation.adapter.WindowsAutomationAdapter.
+> 1. In api/orchestrator.py, connect the task orchestrator to windows_automation.adapter.WindowsAutomationAdapter.
 > 2. When a task request arrives (e.g. target="youtube" or action="open_application"):
 >    - Execute the action through the adapter.
->    - Accurately map the result to the response model:
+>    - Map the result to the response model:
 >      status="COMPLETED" if result.status == "completed" or verified is True.
 >      status="FAILED" with truthful error_code if execution failed.
-> 3. Ensure FastAPI starts cleanly without import errors when launched via:
+> 3. Verify FastAPI starts without errors:
 >    python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 > ```
 
@@ -118,35 +134,36 @@ Each team member has a specific interface contract. Below are the exact instruct
 ### 👨‍💻 Contract 3: New Backend Engineer (Intent & Fallback Catalogue)
 
 * **Files Owned:**
-  * `ai_engine/planner/task_planner.py`
-  * `ai_engine/schemas/command_schema.py`
-  * `desktop/electron/appLauncher.cjs`
-* **Task Objective:**
-  1. Expand the URL and search catalogue for the **Top 50 common applications & services**:
-     * Media: YouTube, Spotify, Netflix, Prime Video, Disney+, Twitch, SoundCloud.
-     * Productivity: Gmail, Google Drive, Google Docs, Notion, Slack, Teams, ChatGPT, Claude.
-     * Developer: GitHub, GitLab, Stack Overflow, VS Code, Terminal.
-     * Social: WhatsApp, LinkedIn, Twitter/X, Reddit, Instagram.
-  2. Entity extraction:
-     * If user says *"play lofi beats on youtube"*, extract `target="youtube"`, `query="lofi beats"`, so the launcher opens:
-       `https://www.youtube.com/results?search_query=lofi+beats`
-     * If user says *"search best python tutorials"*, extract `target="google"`, `query="best python tutorials"`.
-  3. Write test cases validating entity extraction and URL mapping.
-* **Verification Command:**
+  * `ai_engine/planner/task_planner.py` (Command intent parser)
+  * `ai_engine/schemas/command_schema.py` (Action schemas)
+  * `desktop/electron/appLauncher.cjs` (Web fallback mapping reference)
+* **Setup / Fetch Code (First-Time Onboarding):**
   ```powershell
-  python -m unittest ai_engine/tests/test_planner.py
+  # 1. Clone our new repository:
+  git clone https://github.com/logeshwaran-dev05/AI-Desktop-Companion.git
+  cd AI-Desktop-Companion
+
+  # 2. Create your feature branch:
+  git checkout -b feature/backend-intent-fallbacks
   ```
 
-> 📋 **Prompt for New Backend Dev to paste in their IDE:**
+> 📋 **Brief Onboarding Prompt for the New Backend Developer:**
 > ```text
-> You are working on the AI Engine and Intent Mapping (ai_engine/planner/task_planner.py, ai_engine/schemas/command_schema.py).
-> Task:
-> 1. Enhance task_planner.py to parse complex commands with parameters:
->    - "open <app>" -> target=<app>, action="open_application"
->    - "play <query> on youtube" -> target="youtube", action="search_web_app", parameters={"query": "<query>"}
->    - "search <query> on google" -> target="google", action="search_web_app", parameters={"query": "<query>"}
-> 2. Ensure command_schema.py validates these structured outputs.
-> 3. Ensure all tests in ai_engine/tests/ pass cleanly:
+> Context:
+> Welcome to the AI Desktop Companion team! We are building an interactive desktop assistant with a Smart Multi-Path Fallback Engine (it tries opening the native desktop app first; if not installed on the PC, it automatically opens the web service in Google Chrome/Edge, e.g. "Open YouTube" -> opens https://youtube.com in Chrome).
+> 
+> Your Task:
+> 1. In ai_engine/planner/task_planner.py:
+>    - Parse commands with target + search query parameters:
+>      * "open <app>" -> target="<app>", action="open_application"
+>      * "play <query> on youtube" -> target="youtube", action="search_web_app", parameters={"query": "<query>"}
+>      * "search <query> on google" -> target="google", action="search_web_app", parameters={"query": "<query>"}
+> 2. Expand intent mapping for the Top 50 popular apps:
+>    - Media: YouTube, Spotify, Netflix, Prime Video, Disney+
+>    - Productivity: Gmail, Google Drive, Docs, ChatGPT, Claude, Notion, Slack
+>    - Developer: GitHub, GitLab, Stack Overflow, VS Code, Terminal
+>    - Social: WhatsApp, LinkedIn, Twitter/X, Reddit
+> 3. Run and verify tests:
 >    python -m unittest discover -s ai_engine/tests
 > ```
 
