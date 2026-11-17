@@ -8,6 +8,7 @@ export type AvatarAnimState =
   | 'thinking'
   | 'waiting'
   | 'running'
+  | 'greeting'
   | 'success'
   | 'error'
   | 'cancelled'
@@ -18,29 +19,32 @@ interface AvatarCharacterProps {
   size?: number
   className?: string
   style?: CSSProperties
-  /** Horizontal direction Doraemon is facing or walking */
+  /** Horizontal direction Doraemon is facing or walking ('left' | 'right') */
   facing?: 'left' | 'right'
 }
 
-/** Pre-extracted walking frames (facing right natively, mirrored left during travel) */
+/** Pre-extracted walking frames for authentic animated walk cycle */
 const WALK_FRAMES = [
-  '/doraemon/walk/walk_01.png?v=stride2',
-  '/doraemon/walk/walk_02.png?v=stride2',
-  '/doraemon/walk/walk_03.png?v=stride2',
-  '/doraemon/walk/walk_04.png?v=stride2',
-  '/doraemon/walk/walk_05.png?v=stride2',
-  '/doraemon/walk/walk_06.png?v=stride2',
-  '/doraemon/walk/walk_07.png?v=stride2',
-  '/doraemon/walk/walk_08.png?v=stride2',
+  '/doraemon/walk/walk_01.png',
+  '/doraemon/walk/walk_02.png',
+  '/doraemon/walk/walk_03.png',
+  '/doraemon/walk/walk_04.png',
+  '/doraemon/walk/walk_05.png',
+  '/doraemon/walk/walk_06.png',
+  '/doraemon/walk/walk_07.png',
+  '/doraemon/walk/walk_08.png',
 ]
 
 /**
- * Doraemon — Original Companion Character
- * ========================================
- * Renders the authentic Doraemon character with responsive state-driven
- * animations (animated walk cycle extracted directly from reference video,
- * floating Take-copter, sprint runs, celebration jumps, thought bubbles,
- * listening soundwaves, and sparkles).
+ * Doraemon — Original Authentic Companion Character
+ * ==================================================
+ * Implements:
+ * 1. Genuine multi-frame walking cycle (alternating feet & swinging arms from WALK_FRAMES)
+ *    during real desktop movement so Doraemon physically walks instead of shaking.
+ * 2. Direction-aware turning (facing left/right) during travel.
+ * 3. Authentic idle pose from /companion.webp with gentle breathing and eye-blink interval.
+ * 4. Reactive visual effects: listening soundwaves, thought bubbles, celebration stars,
+ *    and speed streaks.
  */
 export default function AvatarCharacter({
   state,
@@ -61,7 +65,7 @@ export default function AvatarCharacter({
   const isError = state === 'error'
   const isCancelled = state === 'cancelled'
 
-  // Preload all walking frames in memory so walking is instantaneous with zero stutter
+  // Preload all walk frames in memory so walking is instantaneous with zero stutter
   useEffect(() => {
     WALK_FRAMES.forEach((src) => {
       const img = new Image()
@@ -69,19 +73,41 @@ export default function AvatarCharacter({
     })
   }, [])
 
-  // Step through the 8 walking frames at natural anime pace (~110ms per frame)
+  // Step through the 8 walking frames at natural anime pace (~105ms per frame, 75ms for running)
   useEffect(() => {
-    if (!isWalking) return
+    if (!isWalking) {
+      setWalkFrameIdx(0)
+      return
+    }
 
+    const intervalMs = isRunning ? 75 : 105
     const timer = setInterval(() => {
       setWalkFrameIdx((prev) => (prev + 1) % WALK_FRAMES.length)
-    }, 110)
+    }, intervalMs)
 
     return () => {
       clearInterval(timer)
       setWalkFrameIdx(0)
     }
-  }, [isWalking])
+  }, [isRunning, isWalking])
+
+  const currentDisplaySrc = isWalking ? WALK_FRAMES[walkFrameIdx] : imgSrc
+
+  const filterStyle = isCancelled
+    ? 'grayscale(0.4) brightness(0.85) drop-shadow(0 8px 16px rgba(0,0,0,0.45))'
+    : isError
+    ? 'drop-shadow(0 0 16px rgba(239, 68, 68, 0.65)) drop-shadow(0 12px 20px rgba(0,0,0,0.45))'
+    : isSuccess
+    ? 'drop-shadow(0 0 20px rgba(52, 211, 153, 0.7)) drop-shadow(0 12px 20px rgba(0,0,0,0.45))'
+    : isRunning
+    ? 'drop-shadow(0 0 20px rgba(0, 212, 255, 0.7)) drop-shadow(0 12px 20px rgba(0,0,0,0.45))'
+    : isWalking
+    ? 'drop-shadow(0 0 16px rgba(0, 212, 255, 0.6)) drop-shadow(0 10px 18px rgba(0,0,0,0.4))'
+    : isListening
+    ? 'drop-shadow(0 0 22px rgba(0, 212, 255, 0.85)) drop-shadow(0 12px 20px rgba(0,0,0,0.45))'
+    : isThinking
+    ? 'drop-shadow(0 0 18px rgba(168, 85, 247, 0.6)) drop-shadow(0 12px 20px rgba(0,0,0,0.45))'
+    : 'drop-shadow(0 14px 24px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 20px rgba(0, 212, 255, 0.3))'
 
   const wrapperClass = [
     'avatar-char-wrap',
@@ -89,8 +115,6 @@ export default function AvatarCharacter({
     `avatar-state-${state}`,
     className ?? '',
   ].join(' ')
-
-  const currentDisplaySrc = isWalking ? WALK_FRAMES[walkFrameIdx] : imgSrc
 
   return (
     <div
@@ -115,16 +139,16 @@ export default function AvatarCharacter({
           className="doraemon-fx-listening"
           style={{
             position: 'absolute',
-            top: -14,
+            top: -16,
             right: 4,
             display: 'flex',
             alignItems: 'center',
             gap: 3,
-            background: 'rgba(56, 189, 248, 0.22)',
-            border: '1px solid rgba(56, 189, 248, 0.65)',
+            background: 'rgba(0, 212, 255, 0.22)',
+            border: '1px solid rgba(0, 212, 255, 0.75)',
             borderRadius: 14,
             padding: '2px 8px',
-            boxShadow: '0 0 14px rgba(56, 189, 248, 0.45)',
+            boxShadow: '0 0 16px rgba(0, 212, 255, 0.55)',
             pointerEvents: 'none',
             zIndex: 10,
           }}
@@ -143,7 +167,7 @@ export default function AvatarCharacter({
           className="doraemon-fx-thinking"
           style={{
             position: 'absolute',
-            top: -12,
+            top: -14,
             right: 8,
             display: 'flex',
             gap: 4,
@@ -152,7 +176,7 @@ export default function AvatarCharacter({
           }}
           aria-hidden="true"
         >
-          <span style={{ fontSize: 13, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.25))' }}>💭</span>
+          <span style={{ fontSize: 15, filter: 'drop-shadow(0 2px 6px rgba(168, 85, 247, 0.5))' }}>💭</span>
         </div>
       )}
 
@@ -162,7 +186,7 @@ export default function AvatarCharacter({
           className="doraemon-fx-success"
           style={{
             position: 'absolute',
-            inset: -12,
+            inset: -14,
             pointerEvents: 'none',
             zIndex: 10,
             display: 'flex',
@@ -171,33 +195,31 @@ export default function AvatarCharacter({
           }}
           aria-hidden="true"
         >
-          <span style={{ fontSize: 20, transform: 'rotate(-15deg)', filter: 'drop-shadow(0 2px 6px #F59E0B)' }}>✨</span>
-          <span style={{ fontSize: 22, transform: 'rotate(20deg)', filter: 'drop-shadow(0 2px 6px #FBBF24)' }}>⭐</span>
+          <span style={{ fontSize: 22, transform: 'rotate(-15deg)', filter: 'drop-shadow(0 0 8px #F59E0B)' }}>✨</span>
+          <span style={{ fontSize: 24, transform: 'rotate(20deg)', filter: 'drop-shadow(0 0 10px #FBBF24)' }}>⭐</span>
         </div>
       )}
 
-      {/* Running state: Wind / speed dash streaks (trail behind movement) */}
-      {isRunning && (
+      {/* Running / Walking speed dash streaks */}
+      {isWalking && (
         <div
           className="doraemon-fx-running"
           style={{
             position: 'absolute',
-            bottom: 12,
-            ...(facing === 'left'
-              ? { right: -18, transform: 'scaleX(-1)' }
-              : { left: -18, transform: 'none' }),
+            bottom: 10,
+            ...(facing === 'left' ? { right: -18, transform: 'scaleX(-1)' } : { left: -18 }),
             pointerEvents: 'none',
             zIndex: 1,
             display: 'flex',
             flexDirection: 'column',
             gap: 3,
-            opacity: 0.85,
+            opacity: isRunning ? 0.9 : 0.65,
           }}
           aria-hidden="true"
         >
-          <div style={{ width: 28, height: 3, background: '#38BDF8', borderRadius: 2 }} />
-          <div style={{ width: 18, height: 3, background: '#60A5FA', borderRadius: 2, marginLeft: 6 }} />
-          <div style={{ width: 24, height: 3, background: '#93C5FD', borderRadius: 2 }} />
+          <div style={{ width: isRunning ? 32 : 20, height: 3, background: '#00D4FF', borderRadius: 2, boxShadow: '0 0 6px #00D4FF' }} />
+          <div style={{ width: isRunning ? 22 : 14, height: 3, background: '#60A5FA', borderRadius: 2, marginLeft: 6 }} />
+          <div style={{ width: isRunning ? 28 : 18, height: 3, background: '#93C5FD', borderRadius: 2 }} />
         </div>
       )}
 
@@ -219,7 +241,7 @@ export default function AvatarCharacter({
             justifyContent: 'center',
             fontSize: 13,
             fontWeight: 'bold',
-            boxShadow: '0 2px 6px rgba(245, 158, 11, 0.45)',
+            boxShadow: '0 2px 8px rgba(245, 158, 11, 0.6)',
             zIndex: 10,
           }}
           aria-hidden="true"
@@ -228,7 +250,7 @@ export default function AvatarCharacter({
         </div>
       )}
 
-      {/* Error / Cancelled state: Sweat / alert mark */}
+      {/* Error / Cancelled state: Sweat mark */}
       {(isError || isCancelled) && (
         <div
           className="doraemon-fx-error"
@@ -236,8 +258,8 @@ export default function AvatarCharacter({
             position: 'absolute',
             top: 2,
             right: 16,
-            fontSize: 16,
-            filter: 'drop-shadow(0 2px 4px rgba(239, 68, 68, 0.5))',
+            fontSize: 18,
+            filter: 'drop-shadow(0 2px 6px rgba(239, 68, 68, 0.6))',
             pointerEvents: 'none',
             zIndex: 10,
           }}
@@ -248,42 +270,40 @@ export default function AvatarCharacter({
       )}
 
       {/* ── Doraemon Character Display (Walk frames or Idle Companion) ─── */}
-      <img
-        src={currentDisplaySrc}
-        alt={`Doraemon companion — ${state}`}
-        width={size}
-        draggable={false}
-        onError={() => {
-          if (imgSrc === '/companion.webp') {
-            setImgSrc('/companion.webp.png')
-          }
-        }}
-        className={`avatar-character-img doraemon-character-img ${isWalking ? 'doraemon-walking-img' : ''} ${isRunning ? 'doraemon-running-tilt' : ''} ${facing === 'left' ? 'doraemon-facing-left' : 'doraemon-facing-right'}`}
+      <div
+        className="doraemon-character-stage"
         style={{
-          display: 'block',
-          width: size,
-          height: 'auto',
-          objectFit: 'contain',
-          pointerEvents: 'none',
-          userSelect: 'none',
-          filter: isCancelled
-            ? 'grayscale(0.4) brightness(0.85) drop-shadow(0 8px 16px rgba(0,0,0,0.35))'
-            : isError
-            ? 'drop-shadow(0 0 16px rgba(239, 68, 68, 0.55)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
-            : isSuccess
-            ? 'drop-shadow(0 0 18px rgba(52, 211, 153, 0.6)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
-            : isWalking
-            ? 'drop-shadow(0 0 16px rgba(56, 189, 248, 0.55)) drop-shadow(0 10px 18px rgba(0,0,0,0.35))'
-            : isRunning
-            ? 'drop-shadow(0 0 18px rgba(56, 189, 248, 0.6)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
-            : isListening
-            ? 'drop-shadow(0 0 20px rgba(56, 189, 248, 0.75)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
-            : isThinking
-            ? 'drop-shadow(0 0 16px rgba(168, 85, 247, 0.5)) drop-shadow(0 12px 20px rgba(0,0,0,0.35))'
-            : 'drop-shadow(0 14px 22px rgba(0, 0, 0, 0.4)) drop-shadow(0 0 20px rgba(56, 189, 248, 0.25))',
-          transition: 'filter 0.3s ease, transform 0.25s ease',
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          filter: filterStyle,
+          transition: 'filter 0.3s ease',
         }}
-      />
+      >
+        <img
+          src={currentDisplaySrc}
+          alt={`Doraemon companion — ${state}`}
+          draggable={false}
+          width={size}
+          onError={() => {
+            if (imgSrc === '/companion.webp') {
+              setImgSrc('/companion.webp.png')
+            }
+          }}
+          className={`doraemon-character-img ${isWalking ? 'doraemon-walking-img' : 'doraemon-idle-breathing'} ${facing === 'left' ? 'doraemon-facing-left' : 'doraemon-facing-right'}`}
+          style={{
+            display: 'block',
+            width: size,
+            height: 'auto',
+            objectFit: 'contain',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            transform: facing === 'left' ? 'scaleX(-1)' : 'scaleX(1)',
+            transition: isWalking ? 'none' : 'transform 0.22s ease',
+          }}
+        />
+      </div>
     </div>
   )
 }

@@ -146,7 +146,7 @@ function createAvatarWindow() {
     resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    focusable: false,
+    focusable: true,
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -342,11 +342,27 @@ ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayNa
   let moveResult = { completed: true, cancelled: false };
 
   if (avatarWindow && !avatarWindow.isDestroyed()) {
+    // If chatbox is open, collapse back to compact avatar window (240x300) before travelling
+    const [currW, currH] = avatarWindow.getSize();
+    if (currW > 240 || currH > 300) {
+      const [currX, currY] = avatarWindow.getPosition();
+      avatarWindow.setBounds({
+        x: currX,
+        y: Math.round(currY + (currH - 300)),
+        width: 240,
+        height: 300,
+      });
+      avatarWindow.webContents.send('companion:sync-state', {
+        chatboxOpen: false,
+      });
+    }
+
     avatarWindow.show();
     avatarWindow.webContents.send('companion:sync-state', {
       avatarState: 'Working',
       taskState: 'launching',
       isMoving: true,
+      chatboxOpen: false,
     });
 
     moveResult = await moveAvatarTo(
@@ -427,9 +443,6 @@ ipcMain.handle('companion:open-dashboard', () => {
     dashboardWindow.show();
     dashboardWindow.focus();
   }
-  if (avatarWindow && !avatarWindow.isDestroyed()) {
-    avatarWindow.hide();
-  }
   return true;
 });
 
@@ -448,9 +461,6 @@ ipcMain.handle('companion:sleep-avatar', () => {
 });
 
 ipcMain.handle('companion:wake-avatar', () => {
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-    dashboardWindow.hide();
-  }
   if (!avatarWindow || avatarWindow.isDestroyed()) {
     createAvatarWindow();
   } else {
@@ -460,6 +470,42 @@ ipcMain.handle('companion:wake-avatar', () => {
     } catch {
       avatarWindow.setAlwaysOnTop(true);
     }
+  }
+  return true;
+});
+
+ipcMain.handle('companion:set-chatbox-open', (_event, isOpen) => {
+  if (!avatarWindow || avatarWindow.isDestroyed()) return false;
+  const [currX, currY] = avatarWindow.getPosition();
+  const [_currW, currH] = avatarWindow.getSize();
+  const primaryDisplay = screen.getDisplayNearestPoint({ x: currX, y: currY });
+  const workArea = primaryDisplay.workArea;
+
+  if (isOpen) {
+    const targetW = 660;
+    const targetH = 540;
+    // Doraemon is positioned on the LEFT side of the expanded window.
+    // Anchor Doraemon's X coordinate stably at currX (the chatbox opens to his right).
+    let targetX = currX;
+    if (targetX + targetW > workArea.x + workArea.width) {
+      targetX = workArea.x + workArea.width - targetW;
+    }
+    targetX = Math.max(workArea.x, targetX);
+
+    // Anchor vertically to bottom so Doraemon remains grounded on the desktop
+    let targetY = currY - (targetH - currH);
+    targetY = Math.max(workArea.y, Math.min(targetY, workArea.y + workArea.height - targetH));
+    avatarWindow.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH });
+  } else {
+    const targetW = 240;
+    const targetH = 300;
+    // Doraemon was on the LEFT side of the expanded window, so his X was currX.
+    let targetX = currX;
+    targetX = Math.max(workArea.x, Math.min(targetX, workArea.x + workArea.width - targetW));
+
+    let targetY = currY + (currH - targetH);
+    targetY = Math.max(workArea.y, Math.min(targetY, workArea.y + workArea.height - targetH));
+    avatarWindow.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH });
   }
   return true;
 });
@@ -505,10 +551,11 @@ ipcMain.handle('companion:sync-state', (_event, data) => {
 });
 
 app.whenReady().then(() => {
-  console.log('[Electron] Application ready. Initializing Dashboard and System Tray...');
+  console.log('[Electron] Application ready. Initializing Dashboard, Avatar, and System Tray...');
   createDashboardWindow();
+  createAvatarWindow();
   createTray();
-  console.log('[Electron] Started with single Doraemon companion.');
+  console.log('[Electron] Started with Mission Control Dashboard and floating Doraemon companion.');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

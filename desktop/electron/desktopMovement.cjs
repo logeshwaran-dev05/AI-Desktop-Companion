@@ -122,6 +122,7 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
         avatarState: 'Working',
         facing,
         isMoving: true,
+        taskState: 'launching',
       });
     }
 
@@ -158,8 +159,10 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
         // Final arrival notification
         if (!avatarWindow.isDestroyed() && avatarWindow.webContents) {
           avatarWindow.webContents.send('companion:sync-state', {
+            avatarState: 'Success',
             facing,
             isMoving: false,
+            taskState: 'success',
           });
         }
 

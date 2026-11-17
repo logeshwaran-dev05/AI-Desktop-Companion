@@ -1,98 +1,186 @@
 /*
- * Avatar Character Animations
- * ============================
- * All animation states are driven by CSS classes set from React state.
- * State → class mapping:
- *   idle        → .avatar-state-idle
- *   listening   → .avatar-state-listening
- *   thinking    → .avatar-state-thinking
- *   waiting     → .avatar-state-waiting
- *   running     → .avatar-state-running
- *   success     → .avatar-state-success
- *   error       → .avatar-state-error
- *   cancelled   → .avatar-state-cancelled
+ * Avatar Character Animations — Doraemon Native Companion
+ * ========================================================
+ * Authentic animations preserving Doraemon's original character design,
+ * proportions, face, eyes, nose, mouth, bell, collar, and colors.
  *
- * Respects prefers-reduced-motion. All animations are opt-in via
- * the wrapper class. No animation fires unless the correct state class
- * is present, so the avatar cannot animate out-of-sync with real state.
+ * Implements:
+ * 1. Natural idle animation with subtle breathing.
+ * 2. Realistic walking with alternating stride, arm swing rhythm, and gentle body bounce.
+ * 3. Running animation with faster tempo, forward lean, and speed streaks.
+ * 4. Direction-aware turning (facing left/right) across the Windows desktop.
+ * 5. Natural greeting and waving animation.
+ * 6. Expressive thinking, success, and error animations.
+ * 7. Synchronization with Electron window movement.
  */
 
-/* ── Keyframe Definitions ─────────────────────────────────────────────────── */
+/* ── Direction-Aware Turning ─────────────────────────────────────────────── */
+.doraemon-facing-left {
+  transform: scaleX(-1);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
 
-@keyframes avatar-float {
-  0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-8px); }
+.doraemon-facing-right {
+  transform: scaleX(1);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Subtle Idle Breathing & Hover ───────────────────────────────────────── */
+@keyframes doraemon-breathe {
+  0%, 100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.012, 1.018);
+  }
+}
+
+/* ── Realistic Walking Ground Contact (Subtle vertical step, zero rotational wobble) ───── */
+@keyframes doraemon-walking-step {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* ── Running Keyframes (Faster Tempo, Lean & Stride) ─────────────────────── */
+@keyframes doraemon-running-sprint {
+  0% {
+    transform: translateY(0) rotate(7deg);
+  }
+  25% {
+    transform: translateY(-9px) rotate(9deg);
+  }
+  50% {
+    transform: translateY(0) rotate(7deg);
+  }
+  75% {
+    transform: translateY(-9px) rotate(5deg);
+  }
+  100% {
+    transform: translateY(0) rotate(7deg);
+  }
+}
+
+/* ── Greeting & Waving Keyframes ─────────────────────────────────────────── */
+@keyframes doraemon-greeting-bounce {
+  0%, 100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(3deg);
+  }
+}
+
+/* ── Thinking Keyframes ─────────────────────────────────────────────────── */
+@keyframes doraemon-think-tilt {
+  0%, 100% {
+    transform: translateY(0) rotate(-5deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(-2deg);
+  }
+}
+
+/* ── Success Celebration Keyframes ───────────────────────────────────────── */
+@keyframes doraemon-success-jump {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-26px) scale(1.06);
+  }
+  65% {
+    transform: translateY(-18px) scale(1.03);
+  }
+}
+
+/* ── Error & Slump Keyframes ─────────────────────────────────────────────── */
+@keyframes doraemon-error-wobble {
+  0%, 100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  20%, 60% {
+    transform: translateX(-5px) rotate(-4deg);
+  }
+  40%, 80% {
+    transform: translateX(5px) rotate(4deg);
+  }
+}
+
+@keyframes doraemon-droop {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  100% {
+    transform: translateY(8px) rotate(-3.5deg);
+  }
 }
 
 @keyframes avatar-attentive-pulse {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50%       { transform: translateY(-4px) scale(1.02); }
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.02);
+  }
 }
 
 @keyframes listening-wave {
-  0%, 100% { height: 4px; }
-  50%       { height: 14px; }
+  0%, 100% {
+    height: 4px;
+  }
+  50% {
+    height: 14px;
+  }
 }
 
-@keyframes avatar-blink {
-  0%, 90%, 100% { transform: scaleY(1); }
-  93%            { transform: scaleY(0.08); }
+/* ── State Class Bindings ────────────────────────────────────────────────── */
+
+/* 1. Idle — Subtle Breathing */
+.avatar-state-idle .doraemon-character-img {
+  animation: doraemon-breathe 3.4s ease-in-out infinite;
 }
 
-@keyframes avatar-think-tilt {
-  0%, 100% { transform: rotate(0deg); }
-  40%      { transform: rotate(-4deg); }
-  70%      { transform: rotate(2deg); }
+/* 2. Walking — Frame cycle drives the anime walk stride (no artificial wobble) */
+.avatar-state-walking .doraemon-character-img {
+  animation: none;
 }
 
-@keyframes avatar-fidget {
-  0%, 100% { transform: translateX(0) rotate(0deg); }
-  25%      { transform: translateX(-3px) rotate(-1deg); }
-  75%      { transform: translateX(3px) rotate(1deg); }
+/* 3. Running — Rapid Cadence & Forward Sprint */
+.avatar-state-running .doraemon-character-img {
+  animation: doraemon-running-sprint 0.32s ease-in-out infinite;
 }
 
-@keyframes avatar-run {
-  0%   { transform: translateX(0); }
-  100% { transform: translateX(28px); }
+/* 4. Greeting — Friendly Waving & Bounce */
+.avatar-state-greeting .doraemon-character-img {
+  animation: doraemon-greeting-bounce 0.44s ease-in-out infinite;
 }
 
-@keyframes avatar-jump {
-  0%, 100% { transform: translateY(0) scale(1); }
-  35%      { transform: translateY(-22px) scale(1.05); }
-  65%      { transform: translateY(-18px) scale(1.02); }
+/* 5. Thinking — Head Tilt */
+.avatar-state-thinking .doraemon-character-img {
+  animation: doraemon-think-tilt 2.4s ease-in-out infinite;
 }
 
-@keyframes avatar-shake {
-  0%, 100%  { transform: translateX(0); }
-  15%, 45%, 75% { transform: translateX(-6px); }
-  30%, 60%, 90% { transform: translateX(6px); }
+/* 6. Success — Celebration Jump */
+.avatar-state-success .doraemon-character-img {
+  animation: doraemon-success-jump 0.8s ease-out 2;
 }
 
-@keyframes avatar-droop {
-  0%   { transform: translateY(0) rotate(0deg); }
-  100% { transform: translateY(6px) rotate(-3deg); }
+/* 7. Error — Distress Wobble */
+.avatar-state-error .doraemon-character-img {
+  animation: doraemon-error-wobble 0.55s ease-in-out 3;
 }
 
-@keyframes avatar-eye-blink {
-  0%, 88%, 100% { transform: scaleY(1); }
-  92%           { transform: scaleY(0.1); }
+/* 8. Cancelled — Droop */
+.avatar-state-cancelled .doraemon-character-img {
+  animation: doraemon-droop 0.4s ease-out forwards;
 }
 
-/* ── State Classes ─────────────────────────────────────────────────────────── */
-
-/* Idle — gentle float + periodic eye blink */
-.avatar-state-idle .avatar-char-wrap,
-.avatar-state-idle .avatar-sprite-wrapper,
-.avatar-char-wrap.avatar-state-idle,
-.avatar-sprite-wrapper.avatar-state-idle {
-  animation: avatar-float 3.2s ease-in-out infinite;
-}
-
-/* Listening — attentive slight pulse */
-.avatar-state-listening .avatar-char-wrap,
-.avatar-state-listening .avatar-sprite-wrapper,
-.avatar-char-wrap.avatar-state-listening,
-.avatar-sprite-wrapper.avatar-state-listening {
+/* 9. Listening — Attentive Pulse */
+.avatar-state-listening .doraemon-character-img {
   animation: avatar-attentive-pulse 1.8s ease-in-out infinite;
 }
 
@@ -107,246 +195,41 @@
 .listening-bar.bar-2 { animation: listening-wave 0.8s ease-in-out infinite 0.15s; }
 .listening-bar.bar-3 { animation: listening-wave 0.7s ease-in-out infinite 0.3s; }
 
-/* Thinking — head tilt loop */
-.avatar-state-thinking .avatar-char-wrap,
-.avatar-state-thinking .avatar-sprite-wrapper,
-.avatar-char-wrap.avatar-state-thinking,
-.avatar-sprite-wrapper.avatar-state-thinking {
-  animation: avatar-think-tilt 2.4s ease-in-out infinite;
-}
-
-/* Waiting / Approval — nervous fidget */
-.avatar-state-waiting .avatar-char-wrap,
-.avatar-state-waiting .avatar-sprite-wrapper,
-.avatar-char-wrap.avatar-state-waiting,
-.avatar-sprite-wrapper.avatar-state-waiting {
-  animation: avatar-fidget 0.9s ease-in-out infinite;
-}
-
-/* Running — horizontal translate back and forth */
-.avatar-state-running .avatar-char-wrap,
-.avatar-state-running .avatar-sprite-wrapper,
-.avatar-char-wrap.avatar-state-running,
-.avatar-sprite-wrapper.avatar-state-running {
-  animation: avatar-run 0.55s ease-in-out infinite alternate;
-}
-
-/* Success — jump celebration */
-.avatar-state-success .avatar-char-wrap,
-.avatar-state-success .avatar-sprite-wrapper,
-.avatar-char-wrap.avatar-state-success,
-.avatar-sprite-wrapper.avatar-state-success {
-  animation: avatar-jump 0.7s ease-out 2;
-}
-
-/* Error — shake */
-.avatar-state-error .avatar-char-wrap,
-.avatar-state-error .avatar-sprite-wrapper,
-.avatar-char-wrap.avatar-state-error,
-.avatar-sprite-wrapper.avatar-state-error {
-  animation: avatar-shake 0.55s ease-in-out 2;
-}
-
-/* Cancelled — droop / slump */
-.avatar-state-cancelled .avatar-char-wrap,
-.avatar-state-cancelled .avatar-sprite-wrapper,
-.avatar-char-wrap.avatar-state-cancelled,
-.avatar-sprite-wrapper.avatar-state-cancelled {
-  animation: avatar-droop 0.4s ease-out forwards;
-}
-
-/* ── Reduced Motion Override ─────────────────────────────────────────────── */
-@media (prefers-reduced-motion: reduce) {
-  .avatar-state-idle .avatar-char-wrap,
-  .avatar-state-idle .avatar-sprite-wrapper,
-  .avatar-char-wrap.avatar-state-idle,
-  .avatar-sprite-wrapper.avatar-state-idle,
-  .avatar-state-listening .avatar-char-wrap,
-  .avatar-state-listening .avatar-sprite-wrapper,
-  .avatar-char-wrap.avatar-state-listening,
-  .avatar-sprite-wrapper.avatar-state-listening,
-  .avatar-state-thinking .avatar-char-wrap,
-  .avatar-state-thinking .avatar-sprite-wrapper,
-  .avatar-char-wrap.avatar-state-thinking,
-  .avatar-sprite-wrapper.avatar-state-thinking,
-  .avatar-state-waiting .avatar-char-wrap,
-  .avatar-state-waiting .avatar-sprite-wrapper,
-  .avatar-char-wrap.avatar-state-waiting,
-  .avatar-sprite-wrapper.avatar-state-waiting,
-  .avatar-state-running .avatar-char-wrap,
-  .avatar-state-running .avatar-sprite-wrapper,
-  .avatar-char-wrap.avatar-state-running,
-  .avatar-sprite-wrapper.avatar-state-running,
-  .avatar-state-success .avatar-char-wrap,
-  .avatar-state-success .avatar-sprite-wrapper,
-  .avatar-char-wrap.avatar-state-success,
-  .avatar-sprite-wrapper.avatar-state-success,
-  .avatar-state-error .avatar-char-wrap,
-  .avatar-state-error .avatar-sprite-wrapper,
-  .avatar-char-wrap.avatar-state-error,
-  .avatar-sprite-wrapper.avatar-state-error,
-  .avatar-state-cancelled .avatar-char-wrap,
-  .avatar-state-cancelled .avatar-sprite-wrapper,
-  .avatar-char-wrap.avatar-state-cancelled,
-  .avatar-sprite-wrapper.avatar-state-cancelled {
-    animation: none;
-    transform: none;
-  }
-}
-
-/* ── Launch Status Banner ─────────────────────────────────────────────────── */
-.launch-status-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  font-size: 13px;
-  line-height: 1.45;
-  margin-top: 8px;
-  border: 1px solid transparent;
-}
-.launch-status-banner.launch-resolving,
-.launch-status-banner.launch-launching {
-  background: #EFF6FF;
-  border-color: #BFDBFE;
-  color: #1e40af;
-}
-.launch-status-banner.launch-success {
-  background: #F0FDF4;
-  border-color: #BBF7D0;
-  color: #166534;
-}
-.launch-status-banner.launch-error,
-.launch-status-banner.launch-not-allowed {
-  background: #FEF2F2;
-  border-color: #FECACA;
-  color: #991B1B;
-}
-.launch-status-banner.launch-not-in-electron {
-  background: #FFFBEB;
-  border-color: #FDE68A;
-  color: #92400E;
-}
-.launch-status-icon {
-  font-size: 16px;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-.launch-status-text strong {
-  display: block;
-  margin-bottom: 2px;
-}
-.launch-unverified-note {
-  font-size: 11px;
-  opacity: 0.75;
-  margin-top: 3px;
-}
-
-/* ── Doraemon Expressive State Enhancements ─────────────────────────────── */
-.doraemon-running-tilt {
-  transform: rotate(6deg) skewX(-3deg);
-  transition: transform 0.2s ease-out;
-}
-
-.avatar-state-running .doraemon-fx-running {
+/* ── Speed Streaks & FX ──────────────────────────────────────────────────── */
+.doraemon-fx-running {
   animation: doraemon-dash-lines 0.4s ease-in-out infinite alternate;
 }
-
+.doraemon-fx-running.doraemon-fx-walking {
+  animation: doraemon-dash-lines 0.62s ease-in-out infinite alternate;
+}
 @keyframes doraemon-dash-lines {
-  0% { transform: scaleX(0.8) translateX(-3px); opacity: 0.6; }
-  100% { transform: scaleX(1.2) translateX(2px); opacity: 1; }
+  0% { transform: scaleX(0.8) translateX(-3px); opacity: 0.4; }
+  100% { transform: scaleX(1.2) translateX(2px); opacity: 0.9; }
 }
 
 .avatar-state-success .doraemon-fx-success {
   animation: doraemon-sparkle-pop 0.6s ease-out infinite alternate;
 }
-
 @keyframes doraemon-sparkle-pop {
   0% { transform: scale(0.9) translateY(0); }
   100% { transform: scale(1.15) translateY(-4px); }
 }
 
-.doraemon-facing-left {
-  transform: scaleX(-1);
-}
-
-.doraemon-facing-right {
-  transform: scaleX(1);
-}
-
-.doraemon-running-tilt.doraemon-facing-left {
-  transform: scaleX(-1) rotate(6deg) skewX(-3deg);
-}
-
-.doraemon-running-tilt.doraemon-facing-right {
-  transform: rotate(6deg) skewX(-3deg);
-}
-
-/* ── Walking Animation (Sprite / Frame Cycle) ────────────────────────────── */
-.avatar-state-walking .avatar-char-wrap,
-.avatar-char-wrap.avatar-state-walking {
-  /* Let the extracted walking frames drive the natural step bounce */
-  animation: none;
-}
-
-.doraemon-walking-img {
-  image-rendering: auto;
-  transition: transform 0.2s ease-out;
-}
-
-/* ── Mode Toggle Pill & Movement Controls ────────────────────────────────── */
-.mode-toggle-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.2s ease;
+/* ── Base Image Styling ─────────────────────────────────────────────────── */
+.doraemon-character-img {
+  display: block;
   user-select: none;
-}
-.mode-toggle-pill .mode-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.mode-toggle-pill.mode-real {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-  border-color: rgba(34, 197, 94, 0.4);
-}
-.mode-toggle-pill.mode-real .mode-dot {
-  background: #22c55e;
-  box-shadow: 0 0 6px #22c55e;
-}
-.mode-toggle-pill.mode-mock {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
-  border-color: rgba(245, 158, 11, 0.4);
-}
-.mode-toggle-pill.mode-mock .mode-dot {
-  background: #f59e0b;
-  box-shadow: 0 0 6px #f59e0b;
+  pointer-events: none;
+  transform-origin: center bottom;
+  transition: transform 0.22s ease-in-out, filter 0.3s ease;
 }
 
-.cancel-move-btn {
-  background: rgba(239, 68, 68, 0.2);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  border-radius: 4px;
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-top: 6px;
-  display: inline-block;
-  transition: background 0.15s;
-}
-.cancel-move-btn:hover {
-  background: rgba(239, 68, 68, 0.35);
+/* ── Reduced Motion Override ─────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .doraemon-character-img,
+  .doraemon-fx-running,
+  .doraemon-fx-success {
+    animation: none !important;
+    transform: none !important;
+  }
 }

@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('companionAPI', {
   setExecutionMode: (mode) => ipcRenderer.invoke('companion:set-execution-mode', mode),
   getExecutionMode: () => ipcRenderer.invoke('companion:get-execution-mode'),
   triggerVoiceTyping: () => ipcRenderer.invoke('companion:trigger-voice-typing'),
+  setChatboxOpen: (isOpen) => ipcRenderer.invoke('companion:set-chatbox-open', isOpen),
 
   onTaskProgress: (callback) => {
     const sub = (_e, data) => callback(data);
