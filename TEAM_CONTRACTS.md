@@ -3,7 +3,7 @@
 > **Document Version:** 2.0 (Leadership Transition & Test Release Edition)  
 > **Team Lead:** Logeshwaran D (`@logeshwaran-dev05`)  
 > **Project Repository:** [https://github.com/logeshwaran-dev05/AI-Desktop-Companion](https://github.com/logeshwaran-dev05/AI-Desktop-Companion)  
-> **Target Release:** Test Version Delivery — **Tomorrow by 7:00 PM IST**
+> **Target Release:** Test Version Delivery — **Tomorrow by 6:30 PM IST** (30-min buffer before 7:00 PM hard deadline)
 
 ---
 
@@ -19,16 +19,17 @@
 
 ---
 
-## 2. Release Timeline — Tomorrow's 7:00 PM Milestone
+## 2. Release Timeline — Target Submission: 6:30 PM IST
 
 | Time (IST) | Milestone Goal | Expected Deliverable |
 | :--- | :--- | :--- |
-| **Tonight - 11:30 AM** | **Core Feature Completion** | Madhan finishes taskbar docking; Ram completes orchestrator status pipeline; New Dev finishes app/URL mappings. |
-| **11:30 AM - 01:00 PM** | **Pull Request Sync & Review** | All feature branches pushed and PRs opened against `main`. Team Lead code review. |
-| **01:00 PM - 03:30 PM** | **End-to-End System Integration** | Connect Voice UI &rarr; Backend Orchestrator &rarr; Smart Fallback Launcher. |
-| **03:30 PM - 05:30 PM** | **Regression Testing & Bug Squash** | Full test runs using `Launch-Companion.bat`. Zero crash tolerance on common voice/text queries. |
-| **05:30 PM - 06:45 PM** | **Demo Recording & Documentation** | Record 2-minute video demonstrating desktop walking, taskbar docking, and opening YouTube/Notepad. |
-| **07:00 PM Sharp** | **Final Test Version Submission** | Tag release `v0.1.0-test` and submit to manager/evaluators. |
+| **Tonight - 11:00 AM** | **Core Feature Completion** | Madhan finishes taskbar docking; Ram completes orchestrator status pipeline; New Dev finishes app/URL mappings. |
+| **11:00 AM - 12:30 PM** | **Pull Request Sync & Review** | All feature branches pushed and PRs opened against `main`. Team Lead code review. |
+| **12:30 PM - 02:30 PM** | **End-to-End System Integration** | Connect Voice UI &rarr; Backend Orchestrator &rarr; Smart Fallback Launcher. |
+| **02:30 PM - 04:30 PM** | **Regression Testing & Bug Squash** | Full test runs using `Launch-Companion.bat`. Zero crash tolerance on common voice/text queries. |
+| **04:30 PM - 05:45 PM** | **Demo Recording & Documentation** | Record 2-minute video demonstrating desktop walking, taskbar docking, and opening YouTube/Notepad. |
+| **06:00 PM - 06:30 PM** | **🚀 Final Test Version Submission** | Tag release `v0.1.0-test` and submit to manager/evaluators (ahead of 7 PM). |
+| **06:30 PM - 07:00 PM** | **Buffer Window** | Safety margin for any unexpected deployment or connectivity hiccups. |
 
 ---
 
@@ -188,7 +189,7 @@ To prevent merge conflicts and ensure a professional development workflow:
    * Test your code locally before creating a Pull Request.
    * Open a PR into `main` and request review from `@logeshwaran-dev05`.
 
-4. **Definition of Done (DoD) for Tomorrow 7 PM**:
+4. **Definition of Done (DoD) for Tomorrow 6:30 PM Submission**:
    * [ ] `Launch-Companion.bat` starts both backend and desktop UI without manual intervention.
    * [ ] Doraemon avatar appears smoothly on screen and docks on the taskbar.
    * [ ] Saying or typing *"Open YouTube"* opens YouTube in Chrome/Edge.
