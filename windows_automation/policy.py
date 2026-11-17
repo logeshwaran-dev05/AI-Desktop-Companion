@@ -2,99 +2,22 @@
 Policy engine and request validator for Windows Automation.
 
 Enforces:
-1. Strict explicit application allowlist (Notepad for Milestone 1).
-2. Rejection of arbitrary executable paths, shell commands, scripts, piping.
-3. Verification of security authorization decisions (denials, missing approvals, invalid states).
+1. Dynamic catalogue allowlisting & strict target validation.
+2. Rejection of arbitrary shell commands, scripts (.bat, .cmd, .ps1, .vbs), directory traversal.
+3. Permitted normal launches without requiring unnecessary user approvals.
+4. Preserved authorization checks for sensitive operations and policy denials.
 """
 
-from typing import Tuple, Optional, Set
+from typing import Tuple, Optional, Set, List, Any
 import os
-import shutil
-from windows_automation.schemas import ActionRequest, AuthorizationDecision
+from windows_automation.schemas import ActionRequest, AuthorizationDecision, ApplicationRecord
+from windows_automation.catalogue import ApplicationCatalogue
 
 
 class WindowsActionPolicy:
-    """Validates incoming action requests against security policies and allowlists."""
+    """Validates incoming action requests against security policies and application allowlists."""
 
-    # Explicit allowlist of supported actions in Milestone 1
     SUPPORTED_ACTIONS: Set[str] = {"open_application"}
-
-    # Explicit allowlist of permitted applications in Milestone 1
-    ALLOWLISTED_APPLICATIONS = {
-        "notepad": {
-            "canonical_name": "Notepad",
-            "executable_name": "notepad.exe",
-            "known_paths": [
-                r"C:\Windows\System32\notepad.exe",
-                r"C:\Windows\notepad.exe",
-                "notepad.exe",
-            ],
-            "requires_user_approval_by_default": False,
-        }
-    }
-
-    def __init__(self):
-        self._dynamic_applications = {}
-
-    def register_application(self, app_id: str, canonical_name: str, executable_name: str, known_paths=None,
-                            requires_user_approval_by_default: bool = False, launch_type: str = "executable",
-                            application_type: str = "application", launch_method: str = "subprocess"):
-        """Register a safe, discovered application for later validation and launch."""
-        if not app_id or not canonical_name or not executable_name:
-            return
-        clean_app_id = app_id.strip().lower()
-        registry = {
-            "canonical_name": canonical_name,
-            "executable_name": executable_name,
-            "known_paths": list(known_paths or [executable_name]),
-            "requires_user_approval_by_default": bool(requires_user_approval_by_default),
-            "launch_type": launch_type,
-            "application_type": application_type,
-            "launch_method": launch_method,
-        }
-        self.ALLOWLISTED_APPLICATIONS[clean_app_id] = registry
-        self._dynamic_applications[clean_app_id] = registry
-
-    def get_registered_application(self, target: str):
-        """Return the allowlisted application metadata for a matched target."""
-        clean_target = (target or "").strip().lower()
-        if not clean_target:
-            return None
-        for key, conf in self.ALLOWLISTED_APPLICATIONS.items():
-            candidates = {
-                key.lower(),
-                conf["canonical_name"].lower(),
-                conf["executable_name"].lower(),
-                *[str(p).lower() for p in conf.get("known_paths", [])],
-            }
-            if clean_target in candidates:
-                return {
-                    "app_id": key,
-                    "canonical_name": conf["canonical_name"],
-                    "executable_name": conf["executable_name"],
-                    "known_paths": conf.get("known_paths", []),
-                    "launch_type": conf.get("launch_type", "executable"),
-                    "application_type": conf.get("application_type", "application"),
-                    "launch_method": conf.get("launch_method", "subprocess"),
-                    "requires_user_approval_by_default": conf.get("requires_user_approval_by_default", False),
-                }
-        return None
-
-    def _match_allowlisted_target(self, target: str):
-        """Return matching allowlist entry for a canonical id, name, or executable name."""
-        clean_target = (target or "").strip().lower()
-        if not clean_target:
-            return None
-        for key, conf in self.ALLOWLISTED_APPLICATIONS.items():
-            candidates = {
-                key.lower(),
-                conf["canonical_name"].lower(),
-                conf["executable_name"].lower(),
-                *[p.lower() for p in conf.get("known_paths", [])],
-            }
-            if clean_target in candidates:
-                return conf
-        return None
 
     # Forbidden shell execution tokens / dangerous argument patterns
     FORBIDDEN_SUBSTRINGS = {
@@ -117,9 +40,40 @@ class WindowsActionPolicy:
         "$",
     }
 
+    # Prohibited executable extensions
+    DISALLOWED_EXTENSIONS = {
+        ".bat",
+        ".cmd",
+        ".ps1",
+        ".vbs",
+        ".vbe",
+        ".js",
+        ".jse",
+        ".wsf",
+        ".wsh",
+        ".msc",
+        ".reg",
+        ".cpl",
+        ".scr",
+    }
+
+    def __init__(self, catalogue: Optional[ApplicationCatalogue] = None):
+        self.catalogue = catalogue or ApplicationCatalogue()
+
+    def load_catalogue_entries(self, entries: Optional[List[Any]] = None) -> None:
+        """Loads and registers catalogue entries for testing or runtime discovery."""
+        if not self.catalogue:
+            self.catalogue = ApplicationCatalogue()
+        if entries:
+            for entry in entries:
+                if isinstance(entry, ApplicationRecord):
+                    self.catalogue.register(entry)
+                elif isinstance(entry, dict):
+                    self.catalogue.register(ApplicationRecord.from_dict(entry))
+
     def validate_request(self, request: ActionRequest) -> Tuple[bool, Optional[str], Optional[str]]:
         """
-        Validate request structure, action name, parameters, and target.
+        Validate request structure, action name, parameters, and target against safe catalogue.
         Returns: (is_valid, error_code, error_message)
         """
         if not request.action_id or not request.task_id:
@@ -138,34 +92,36 @@ class WindowsActionPolicy:
         if not request.target or not request.target.strip():
             return False, "ERR_INVALID_REQUEST", "Target cannot be empty."
 
-        clean_target = request.target.strip().lower()
-        # Disallow arbitrary directory traversal or executable paths unless matching a registered safe app path.
-        is_path_like = ("/" in clean_target) or ("\\" in clean_target)
-        if is_path_like:
-            allow_path = False
-            for conf in self.ALLOWLISTED_APPLICATIONS.values():
-                known = [str(p).lower() for p in conf.get("known_paths", [])]
-                if clean_target in known or clean_target == os.path.normpath(str(conf.get("executable_name", "")).lower()):
-                    allow_path = True
-                    break
-            if not allow_path:
+        clean_target = request.target.strip()
+        lower_target = clean_target.lower()
+
+        # Reject dangerous shell command strings or argument piping
+        for forbidden in self.FORBIDDEN_SUBSTRINGS:
+            if forbidden in lower_target:
                 return (
                     False,
                     "ERR_TARGET_NOT_ALLOWLISTED",
-                    "Arbitrary executable paths and directory traversals are strictly prohibited.",
+                    f"Target contains forbidden shell command token: '{forbidden}'. Arbitrary shell commands are prohibited.",
                 )
 
-        # Check target against explicit allowlist
-        app_entry = self._match_allowlisted_target(request.target)
-
-        if not app_entry:
+        # Check for disallowed script extensions
+        ext = os.path.splitext(clean_target)[1].lower()
+        if ext in self.DISALLOWED_EXTENSIONS:
             return (
                 False,
                 "ERR_TARGET_NOT_ALLOWLISTED",
-                f"Target '{request.target}' is not in the explicit application allowlist. Permitted: {[k.title() for k in self.ALLOWLISTED_APPLICATIONS]}",
+                f"Executable extension '{ext}' is prohibited for security reasons.",
             )
 
-        # Validate parameters - reject dangerous shell arguments or commands
+        # Disallow arbitrary directory traversals
+        if "../" in lower_target or "..\\" in lower_target:
+            return (
+                False,
+                "ERR_TARGET_NOT_ALLOWLISTED",
+                "Directory traversal in application target is strictly prohibited.",
+            )
+
+        # Check parameters
         params = request.parameters or {}
         args = params.get("args", [])
         if not isinstance(args, list):
@@ -180,21 +136,81 @@ class WindowsActionPolicy:
                     f"Parameter contains prohibited shell command characters or tokens: '{arg}'",
                 )
 
-        return True, None, None
+        # Target verification against resolved record or Catalogue
+        if request.resolved_record:
+            record = request.resolved_record
+            if record.app_type == "shortcut" and record.shortcut_path:
+                if not os.path.exists(record.shortcut_path):
+                    return False, "ERR_TARGET_UNAVAILABLE", f"Shortcut file missing: '{record.shortcut_path}'"
+                return True, None, None
+
+            if record.launch_method in ["appx_packaged", "shell_apps_folder"] or record.app_type == "packaged_app":
+                target_id = record.app_user_model_id or record.executable_path
+                if not target_id:
+                    return False, "ERR_TARGET_UNAVAILABLE", f"Packaged application '{record.display_name}' has no AppID or AUMID."
+                # Verify safe characters in AppID (alphanumerics, dots, underscores, dashes, exclamation, curly braces, colons, slashes)
+                if any(c in target_id for c in self.FORBIDDEN_SUBSTRINGS):
+                    return False, "ERR_TARGET_NOT_ALLOWLISTED", f"Packaged app target '{target_id}' contains unsafe characters."
+                return True, None, None
+
+            if not record.executable_path:
+                return False, "ERR_TARGET_UNAVAILABLE", f"Application '{record.display_name}' has no executable path."
+            record_ext = os.path.splitext(record.executable_path)[1].lower()
+            if record_ext and record_ext not in [".exe"]:
+                return (
+                    False,
+                    "ERR_TARGET_NOT_ALLOWLISTED",
+                    f"Resolved target '{record.executable_path}' does not have a safe executable extension (.exe).",
+                )
+            return True, None, None
+
+        if self.catalogue:
+            resolution = self.catalogue.resolve(clean_target)
+            if resolution.status == "resolved" and resolution.matched_record:
+                request.resolved_record = resolution.matched_record
+                return True, None, None
+            elif resolution.status == "ambiguous":
+                cand_names = [c.display_name for c in resolution.candidates]
+                return (
+                    False,
+                    "ERR_AMBIGUOUS_TARGET",
+                    f"Target '{clean_target}' is ambiguous. Candidates: {cand_names}",
+                )
+            elif resolution.status == "unsupported":
+                return (
+                    False,
+                    "ERR_TARGET_UNAVAILABLE",
+                    resolution.reason or f"Target '{clean_target}' is unavailable or unsupported.",
+                )
+
+        # Fallback for explicit built-in Notepad
+        if lower_target in ["notepad", "notepad.exe", r"c:\windows\system32\notepad.exe"]:
+            return True, None, None
+
+        if self.catalogue:
+            return (
+                False,
+                "ERR_TARGET_NOT_FOUND",
+                f"Target '{clean_target}' was not found in the installed application catalogue.",
+            )
+
+        return (
+            False,
+            "ERR_TARGET_NOT_ALLOWLISTED",
+            f"Target '{clean_target}' is not in the explicit application allowlist.",
+        )
 
     def check_authorization(self, request: ActionRequest) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Check authorization decision.
-        Never invents approvals. Missing, denied, or invalid permissions prevent execution.
+        Under revised assignment rules, launching normal validated applications does not require approval.
+        Preserves authorization checks for policy denials or missing approvals if explicitly flagged.
         Returns: (is_authorized, error_code, error_message)
         """
         auth = request.authorization
         if auth is None:
-            return (
-                False,
-                "ERR_PERMISSION_DENIED",
-                "No authorization decision provided with action request.",
-            )
+            # Default to granted for validated application launches if no security restriction specified
+            return True, None, None
 
         if auth.permission_status == "denied":
             reason = auth.reason or "Security policy denied this action."
@@ -224,79 +240,25 @@ class WindowsActionPolicy:
 
         return True, None, None
 
-    def load_catalogue_entries(self, catalogue_entries=None):
-        """Register a set of discovered app entries without hardcoding paths.
+    def resolve_executable_path(self, target: str, request: Optional[ActionRequest] = None) -> Optional[str]:
+        """Resolve validated target to its verified executable or shortcut path."""
+        if request and request.resolved_record:
+            rec = request.resolved_record
+            if rec.app_type == "shortcut" and rec.shortcut_path:
+                return rec.shortcut_path
+            return rec.executable_path
 
-        This bridges the dynamic discovery catalogue into the executor policy so the app
-        launcher can execute discovered Windows applications safely and consistently.
-        """
-        if catalogue_entries is None:
-            try:
-                from api.app_catalogue import catalogue_service
-                catalogue_entries = catalogue_service.get_all_apps()
-            except Exception:
-                catalogue_entries = []
+        if self.catalogue:
+            resolution = self.catalogue.resolve(target)
+            if resolution.status == "resolved" and resolution.matched_record:
+                rec = resolution.matched_record
+                if rec.app_type == "shortcut" and rec.shortcut_path:
+                    return rec.shortcut_path
+                return rec.executable_path
 
-        for app in catalogue_entries or []:
-            try:
-                app_id = (app.get("app_id") or app.get("app_name") or "").strip()
-                canonical_name = (app.get("app_name") or "").strip()
-                launch_target = (app.get("launch_target") or app.get("executable") or "").strip()
-                executable_name = (app.get("executable") or os.path.basename(launch_target) or "").strip()
-                launch_type = app.get("launch_type") or "executable"
-                if not app_id or not canonical_name:
-                    continue
+        clean_lower = target.strip().lower()
+        if clean_lower in ["notepad", "notepad.exe", r"c:\windows\system32\notepad.exe"]:
+            candidate = r"C:\Windows\System32\notepad.exe"
+            return candidate if os.path.exists(candidate) else "notepad.exe"
 
-                # Keep known safe built-ins and settings URIs available, but do not register
-                # every generic built-in tool as directly launchable without review.
-                is_safe_builtin = app.get("allowlisted") is True or app_id in {"notepad", "settings", "settings_system", "settings_bluetooth", "settings_display", "settings_network", "settings_sound", "settings_apps", "settings_update"}
-                if launch_type == "built_in" and not is_safe_builtin:
-                    continue
-                if launch_type == "uri":
-                    if not executable_name and not launch_target:
-                        continue
-                elif not executable_name:
-                    continue
-
-                known_paths = []
-                if launch_target:
-                    known_paths.append(launch_target)
-                if executable_name and executable_name not in known_paths:
-                    known_paths.append(executable_name)
-                if launch_type == "uri" and launch_target:
-                    known_paths.append(launch_target)
-
-                self.register_application(
-                    app_id=app_id,
-                    canonical_name=canonical_name,
-                    executable_name=executable_name,
-                    known_paths=known_paths,
-                    requires_user_approval_by_default=bool(app.get("allowlisted") is not True and launch_type == "executable"),
-                    launch_type=launch_type,
-                    application_type=app.get("application_type") or "application",
-                    launch_method=app.get("launch_method") or ("os.startfile" if launch_type == "uri" else "subprocess"),
-                )
-            except Exception:
-                continue
-
-    def resolve_executable_path(self, target: str) -> Optional[str]:
-        """Resolve allowlisted application to its verified Windows executable path."""
-        clean_target = (target or "").strip().lower()
-        for key, conf in self.ALLOWLISTED_APPLICATIONS.items():
-            candidates = {
-                key.lower(),
-                conf["canonical_name"].lower(),
-                conf["executable_name"].lower(),
-                *[str(p).lower() for p in conf.get("known_paths", [])],
-            }
-            if clean_target in candidates:
-                for candidate in conf["known_paths"]:
-                    if candidate and os.path.exists(candidate):
-                        return candidate
-                if conf["executable_name"].lower().endswith(".exe"):
-                    resolved = shutil.which(conf["executable_name"]) or conf["executable_name"]
-                    if resolved:
-                        return resolved
-                if conf["known_paths"]:
-                    return str(conf["known_paths"][0])
         return None

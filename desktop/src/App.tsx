@@ -79,6 +79,11 @@ const ALLOWLISTED_APPS_INFO = [
   { id: 'chrome', name: 'Google Chrome', icon: '🌐', desc: 'Fast, secure web browsing', exe: 'chrome.exe' },
   { id: 'vscode', name: 'Visual Studio Code', icon: '💻', desc: 'Code editing and development', exe: 'code.cmd' },
   { id: 'whatsapp', name: 'WhatsApp', icon: '💬', desc: 'Desktop messaging application', exe: 'WhatsApp.exe' },
+  { id: 'youtube', name: 'YouTube', icon: '▶️', desc: 'Video streaming & web player', exe: 'youtube.com' },
+  { id: 'spotify', name: 'Spotify', icon: '🎵', desc: 'Music & podcasts streaming', exe: 'Spotify.exe' },
+  { id: 'chatgpt', name: 'ChatGPT', icon: '🤖', desc: 'AI assistant & search', exe: 'chatgpt.com' },
+  { id: 'github', name: 'GitHub', icon: '🐙', desc: 'Repositories & code review', exe: 'github.com' },
+  { id: 'paint', name: 'Paint', icon: '🎨', desc: 'Drawing & image editing', exe: 'mspaint.exe' },
 ]
 
 /** Map the high-level AvatarState to an animation state for Doraemon */

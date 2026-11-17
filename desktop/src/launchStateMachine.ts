@@ -137,6 +137,56 @@ const PHRASE_MAP: Array<{ patterns: RegExp[]; appId: string; displayName: string
     appId: 'whatsapp',
     displayName: 'WhatsApp',
   },
+  {
+    patterns: [/you\s*tube|youtube|yt\b/i],
+    appId: 'youtube',
+    displayName: 'YouTube',
+  },
+  {
+    patterns: [/spotify|music|songs?/i],
+    appId: 'spotify',
+    displayName: 'Spotify',
+  },
+  {
+    patterns: [/netflix|movies?|series/i],
+    appId: 'netflix',
+    displayName: 'Netflix',
+  },
+  {
+    patterns: [/chat\s*gpt|chatgpt|openai/i],
+    appId: 'chatgpt',
+    displayName: 'ChatGPT',
+  },
+  {
+    patterns: [/git\s*hub|github/i],
+    appId: 'github',
+    displayName: 'GitHub',
+  },
+  {
+    patterns: [/g\s*mail|gmail|google\s*mail|emails?/i],
+    appId: 'gmail',
+    displayName: 'Gmail',
+  },
+  {
+    patterns: [/paint|draw(ing)?|mspaint/i],
+    appId: 'paint',
+    displayName: 'Paint',
+  },
+  {
+    patterns: [/cmd|terminal|command\s*prompt|powershell/i],
+    appId: 'cmd',
+    displayName: 'Command Prompt',
+  },
+  {
+    patterns: [/maps|google\s*maps|directions/i],
+    appId: 'maps',
+    displayName: 'Google Maps',
+  },
+  {
+    patterns: [/canva/i],
+    appId: 'canva',
+    displayName: 'Canva',
+  },
 ]
 
 /**

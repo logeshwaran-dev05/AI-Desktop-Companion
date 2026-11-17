@@ -50,6 +50,48 @@ const APP_SHORTCUT_REGISTRY = {
   },
   whatsapp: {
     displayName: 'WhatsApp',
+    possibleShortcuts: ['WhatsApp.lnk'],
+    defaultZone: 'taskbar-tools',
+    gridIndex: 5,
+  },
+  spotify: {
+    displayName: 'Spotify',
+    possibleShortcuts: ['Spotify.lnk'],
+    defaultZone: 'taskbar-tools',
+    gridIndex: 6,
+  },
+  youtube: {
+    displayName: 'YouTube',
+    possibleShortcuts: ['YouTube.lnk', 'Google Chrome.lnk'],
+    defaultZone: 'taskbar-tools',
+    gridIndex: 7,
+  },
+  netflix: {
+    displayName: 'Netflix',
+    possibleShortcuts: ['Netflix.lnk'],
+    defaultZone: 'desktop-grid',
+    gridIndex: 8,
+  },
+  chatgpt: {
+    displayName: 'ChatGPT',
+    possibleShortcuts: ['ChatGPT.lnk'],
+    defaultZone: 'taskbar-tools',
+    gridIndex: 9,
+  },
+  github: {
+    displayName: 'GitHub',
+    possibleShortcuts: ['GitHub.lnk', 'GitHub Desktop.lnk'],
+    defaultZone: 'desktop-grid',
+    gridIndex: 10,
+  },
+  gmail: {
+    displayName: 'Gmail',
+    possibleShortcuts: ['Gmail.lnk'],
+    defaultZone: 'taskbar-tools',
+    gridIndex: 11,
+  },
+  whatsapp: {
+    displayName: 'WhatsApp',
     possibleShortcuts: ['WhatsApp.lnk', 'WhatsApp Desktop.lnk'],
     defaultZone: 'desktop-grid',
     gridIndex: 5,

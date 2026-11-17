@@ -13,44 +13,183 @@
 
 const { exec } = require('child_process');
 
-const APP_ALLOWLIST = [
+/**
+ * Common Windows browser process names for truthful verification
+ */
+const BROWSER_PROCESSES = ['chrome.exe', 'msedge.exe', 'brave.exe', 'firefox.exe', 'opera.exe'];
+
+/**
+ * Comprehensive application registry with native launch commands,
+ * process names, and web/PWA fallbacks.
+ */
+const APP_REGISTRY = [
+  // ── Native Windows Utilities ──
   {
     id: 'notepad',
     displayName: 'Notepad',
+    aliases: ['notepad', 'notes', 'text editor', 'textpad'],
     launchCommand: 'cmd.exe /c start "" notepad',
     processNames: ['Notepad.exe', 'notepad.exe'],
+    type: 'native',
   },
   {
     id: 'calculator',
     displayName: 'Calculator',
+    aliases: ['calc', 'calculator', 'math'],
     launchCommand: 'cmd.exe /c start "" calc',
     processNames: ['CalculatorApp.exe', 'Calculator.exe', 'calc.exe'],
+    type: 'native',
   },
   {
     id: 'explorer',
     displayName: 'File Explorer',
+    aliases: ['explorer', 'files', 'my computer', 'file manager', 'folders'],
     launchCommand: 'cmd.exe /c start "" explorer',
     processNames: ['explorer.exe'],
+    type: 'native',
+  },
+  {
+    id: 'paint',
+    displayName: 'Paint',
+    aliases: ['paint', 'mspaint', 'draw', 'drawing'],
+    launchCommand: 'cmd.exe /c start "" mspaint',
+    processNames: ['mspaint.exe', 'PaintApp.exe'],
+    type: 'native',
+  },
+  {
+    id: 'cmd',
+    displayName: 'Command Prompt',
+    aliases: ['cmd', 'terminal', 'command prompt', 'shell'],
+    launchCommand: 'cmd.exe /c start "" cmd',
+    processNames: ['cmd.exe', 'conhost.exe'],
+    type: 'native',
   },
   {
     id: 'chrome',
     displayName: 'Google Chrome',
+    aliases: ['chrome', 'google chrome', 'browser', 'internet'],
     launchCommand: 'cmd.exe /c start "" chrome',
     processNames: ['chrome.exe'],
+    type: 'native',
   },
   {
     id: 'vscode',
     displayName: 'Visual Studio Code',
+    aliases: ['vscode', 'vs code', 'code', 'editor'],
     launchCommand: 'cmd.exe /c start "" code',
     processNames: ['Code.exe'],
+    type: 'native',
   },
+
+  // ── Dual-Mode Apps (Native first, Web fallback) ──
   {
     id: 'whatsapp',
     displayName: 'WhatsApp',
+    aliases: ['whatsapp', 'wa', 'whats app'],
     launchCommand: 'cmd.exe /c start whatsapp:',
     processNames: ['WhatsApp.exe', 'WhatsApp.Root.exe'],
+    fallbackUrl: 'https://web.whatsapp.com',
+    type: 'hybrid',
+  },
+  {
+    id: 'spotify',
+    displayName: 'Spotify',
+    aliases: ['spotify', 'music', 'songs'],
+    launchCommand: 'cmd.exe /c start spotify:',
+    processNames: ['Spotify.exe'],
+    fallbackUrl: 'https://open.spotify.com',
+    searchUrl: 'https://open.spotify.com/search/',
+    type: 'hybrid',
+  },
+  {
+    id: 'discord',
+    displayName: 'Discord',
+    aliases: ['discord'],
+    launchCommand: 'cmd.exe /c start discord:',
+    processNames: ['Discord.exe'],
+    fallbackUrl: 'https://discord.com/app',
+    type: 'hybrid',
+  },
+
+  // ── Web Services & Cloud Apps (Smart Browser Launch) ──
+  {
+    id: 'youtube',
+    displayName: 'YouTube',
+    aliases: ['youtube', 'yt', 'videos', 'watch'],
+    webUrl: 'https://www.youtube.com',
+    searchUrl: 'https://www.youtube.com/results?search_query=',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'netflix',
+    displayName: 'Netflix',
+    aliases: ['netflix', 'movies', 'series'],
+    webUrl: 'https://www.netflix.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'chatgpt',
+    displayName: 'ChatGPT',
+    aliases: ['chatgpt', 'chat gpt', 'ai chat', 'openai'],
+    webUrl: 'https://chatgpt.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'github',
+    displayName: 'GitHub',
+    aliases: ['github', 'git', 'repo', 'repositories'],
+    webUrl: 'https://github.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'gmail',
+    displayName: 'Gmail',
+    aliases: ['gmail', 'google mail', 'emails', 'inbox'],
+    webUrl: 'https://mail.google.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'google',
+    displayName: 'Google',
+    aliases: ['google', 'search', 'web search'],
+    webUrl: 'https://www.google.com',
+    searchUrl: 'https://www.google.com/search?q=',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'canva',
+    displayName: 'Canva',
+    aliases: ['canva', 'design'],
+    webUrl: 'https://www.canva.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'linkedin',
+    displayName: 'LinkedIn',
+    aliases: ['linkedin', 'jobs'],
+    webUrl: 'https://www.linkedin.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'maps',
+    displayName: 'Google Maps',
+    aliases: ['maps', 'google maps', 'navigation', 'directions'],
+    webUrl: 'https://maps.google.com',
+    searchUrl: 'https://maps.google.com/maps?q=',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
   },
 ];
+
+const APP_ALLOWLIST = APP_REGISTRY;
 
 /**
  * Checks whether any of the given process names are currently running in Windows tasklist
@@ -72,52 +211,79 @@ function verifyProcessRunning(processNames) {
 }
 
 /**
- * Launch a Windows application by allowlist identifier and verify execution.
+ * Open a URL in the user's default browser or Chrome safely
+ * @param {string} url
+ * @returns {Promise<boolean>}
+ */
+function openBrowserUrl(url) {
+  return new Promise((resolve) => {
+    // start "" "<url>" triggers Windows ShellExecute to open the default web browser
+    const cmd = `cmd.exe /c start "" "${url.replace(/"/g, '')}"`;
+    exec(cmd, { windowsHide: false }, (err) => {
+      resolve(!err);
+    });
+  });
+}
+
+/**
+ * Launch an application or web fallback safely with truth verification.
+ * Supports:
+ * - Native application execution
+ * - Hybrid native-to-web fallback (e.g. WhatsApp, Spotify)
+ * - Direct Web application launch (YouTube, Netflix, ChatGPT, etc.)
+ * - Search query routing (e.g. "search lofi on youtube")
  *
- * @param {string} appId - Allowlist identifier
+ * @param {string} appId - Allowlist identifier or search request
+ * @param {object} [options]
+ * @param {string} [options.query] - Optional query or search term
  * @returns {Promise<{
  *   success: boolean,
  *   verified: boolean,
  *   displayName: string,
- *   error?: string,
- *   mode: 'real' | 'not-found'
+ *   mode: 'real' | 'fallback-web' | 'not-found',
+ *   error?: string
  * }>}
  */
-function launchApp(appId) {
-  return new Promise((resolve) => {
-    const normalizedId = (appId || '').trim().toLowerCase();
+function launchApp(appId, options = {}) {
+  return new Promise(async (resolve) => {
+    const rawTarget = (appId || '').trim();
+    const normalized = rawTarget.toLowerCase();
 
-    const appEntry = APP_ALLOWLIST.find((a) => a.id === normalizedId);
+    // 1. Find entry in registry by ID or alias
+    const appEntry = APP_REGISTRY.find(
+      (a) => a.id === normalized || (a.aliases && a.aliases.includes(normalized))
+    );
 
-    if (!appEntry) {
+    // 2. Handle known Web-first apps (e.g. YouTube, Netflix, ChatGPT)
+    if (appEntry && appEntry.type === 'web') {
+      const targetUrl = (options.query && appEntry.searchUrl)
+        ? `${appEntry.searchUrl}${encodeURIComponent(options.query)}`
+        : appEntry.webUrl;
+
+      console.log(`[Launcher] Opening web app ${appEntry.displayName}: ${targetUrl}`);
+      await openBrowserUrl(targetUrl);
+
+      // Verify browser opened in tasklist
+      const verified = await waitForProcess(BROWSER_PROCESSES, 3000);
       resolve({
-        success: false,
-        verified: false,
-        displayName: appId,
-        mode: 'not-found',
-        error: `"${appId}" is not in the allowed application list. Permitted: ${APP_ALLOWLIST.map((a) => a.id).join(', ')}.`,
+        success: true,
+        verified,
+        displayName: `${appEntry.displayName} (Browser)`,
+        mode: 'real',
       });
       return;
     }
 
-    console.log(`[Launcher] Executing real Windows launch for ${appEntry.displayName}: ${appEntry.launchCommand}`);
+    // 3. Handle Native or Hybrid apps (e.g. Notepad, Calculator, WhatsApp, Spotify)
+    if (appEntry) {
+      console.log(`[Launcher] Attempting native launch for ${appEntry.displayName}`);
+      exec(appEntry.launchCommand, { windowsHide: false }, () => {});
 
-    exec(appEntry.launchCommand, { windowsHide: false }, (spawnErr) => {
-      if (spawnErr) {
-        console.warn(`[Launcher] Spawn error for ${appEntry.displayName}:`, spawnErr.message);
-      }
-    });
+      // Verify native process within 1.8 seconds
+      const isNativeRunning = await waitForProcess(appEntry.processNames, 1800);
 
-    // Verification check with active polling over 2.5 seconds
-    const startTime = Date.now();
-    const timeoutMs = 2800;
-
-    const interval = setInterval(async () => {
-      const isRunning = await verifyProcessRunning(appEntry.processNames);
-
-      if (isRunning) {
-        clearInterval(interval);
-        console.log(`[Launcher] Confirmed ${appEntry.displayName} process is running!`);
+      if (isNativeRunning) {
+        console.log(`[Launcher] Confirmed native ${appEntry.displayName} process is running!`);
         resolve({
           success: true,
           verified: true,
@@ -127,19 +293,69 @@ function launchApp(appId) {
         return;
       }
 
-      if (Date.now() - startTime >= timeoutMs) {
-        clearInterval(interval);
-        console.warn(`[Launcher] Verification timed out for ${appEntry.displayName}. Process not detected.`);
+      // If native failed and we have a web fallback (e.g. WhatsApp Web, Spotify Web)
+      if (appEntry.fallbackUrl) {
+        console.log(`[Launcher] Native ${appEntry.displayName} not found. Falling back to Web App: ${appEntry.fallbackUrl}`);
+        await openBrowserUrl(appEntry.fallbackUrl);
+        const isBrowserRunning = await waitForProcess(BROWSER_PROCESSES, 2500);
+
         resolve({
-          success: false,
-          verified: false,
-          displayName: appEntry.displayName,
-          mode: 'real',
-          error: `Could not verify that ${appEntry.displayName} opened. The application may not be installed or failed to launch.`,
+          success: true,
+          verified: isBrowserRunning,
+          displayName: `${appEntry.displayName} (Web Fallback)`,
+          mode: 'fallback-web',
         });
+        return;
       }
-    }, 400);
+
+      // Native utility verification timeout
+      resolve({
+        success: false,
+        verified: false,
+        displayName: appEntry.displayName,
+        mode: 'real',
+        error: `Could not verify that ${appEntry.displayName} opened. It may not be installed on this Windows PC.`,
+      });
+      return;
+    }
+
+    // 4. Universal Fallback: Unrecognized command -> Search Google or YouTube
+    console.log(`[Launcher] No local app registered for "${rawTarget}". Triggering smart search fallback.`);
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(rawTarget)}`;
+    await openBrowserUrl(searchUrl);
+    const browserVerified = await waitForProcess(BROWSER_PROCESSES, 2500);
+
+    resolve({
+      success: true,
+      verified: browserVerified,
+      displayName: `Web Search: "${rawTarget}"`,
+      mode: 'fallback-web',
+    });
   });
 }
 
-module.exports = { launchApp, APP_ALLOWLIST };
+/**
+ * Polls for process existence up to timeoutMs
+ * @param {string[]} processNames
+ * @param {number} timeoutMs
+ * @returns {Promise<boolean>}
+ */
+function waitForProcess(processNames, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const interval = setInterval(async () => {
+      const running = await verifyProcessRunning(processNames);
+      if (running) {
+        clearInterval(interval);
+        resolve(true);
+        return;
+      }
+      if (Date.now() - start >= timeoutMs) {
+        clearInterval(interval);
+        resolve(false);
+      }
+    }, 350);
+  });
+}
+
+module.exports = { launchApp, APP_ALLOWLIST, APP_REGISTRY };

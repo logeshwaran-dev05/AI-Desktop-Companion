@@ -188,9 +188,55 @@ async function returnHome(avatarWindow) {
   return result.completed;
 }
 
+/**
+ * Positions Doraemon directly docked or hanging right above the Windows taskbar.
+ * In Windows, `workArea` automatically subtracts the taskbar height,
+ * so `workArea.y + workArea.height - winHeight` places Doraemon's feet precisely on the taskbar.
+ *
+ * @param {import('electron').BrowserWindow} avatarWindow
+ * @param {number} [horizontalRatio=0.85] - Position across screen (0.0 = left edge, 1.0 = right edge)
+ * @returns {Promise<boolean>}
+ */
+async function dockToTaskbar(avatarWindow, horizontalRatio = 0.85) {
+  if (!avatarWindow || avatarWindow.isDestroyed()) return false;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay.workArea;
+  const [winWidth, winHeight] = avatarWindow.getSize();
+
+  const targetX = Math.round(workArea.x + (workArea.width - winWidth) * Math.max(0, Math.min(1, horizontalRatio)));
+  // Sit directly on the taskbar boundary
+  const targetY = Math.round(workArea.y + workArea.height - winHeight);
+
+  const result = await moveAvatarTo(avatarWindow, targetX, targetY, { durationMs: 2000 });
+  return result.completed;
+}
+
+/**
+ * Animates Doraemon walking along the top of the Windows taskbar
+ * @param {import('electron').BrowserWindow} avatarWindow
+ * @param {number} fromRatio
+ * @param {number} toRatio
+ * @param {number} durationMs
+ * @returns {Promise<boolean>}
+ */
+async function walkAlongTaskbar(avatarWindow, fromRatio = 0.85, toRatio = 0.35, durationMs = 3500) {
+  if (!avatarWindow || avatarWindow.isDestroyed()) return false;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay.workArea;
+  const [winWidth, winHeight] = avatarWindow.getSize();
+
+  const targetX = Math.round(workArea.x + (workArea.width - winWidth) * toRatio);
+  const targetY = Math.round(workArea.y + workArea.height - winHeight);
+
+  const result = await moveAvatarTo(avatarWindow, targetX, targetY, { durationMs });
+  return result.completed;
+}
+
 module.exports = {
   moveAvatarTo,
   returnHome,
+  dockToTaskbar,
+  walkAlongTaskbar,
   cancelActiveMovement,
   getHomePosition,
 };
