@@ -140,7 +140,6 @@ npm --prefix desktop run build
 
 ```text
 ├── Launch-Companion.bat        # One-click start script for backend + desktop UI
-├── TEST_GUIDE_FOR_MANAGER.md   # Testing checklist & demo evaluation guide
 ├── TEAM_CONTRACTS.md           # Role allocations, prompt guides & API contracts
 ├── ai_engine/                  # Speech-to-text (Whisper), prompt parser, schemas
 │   ├── catalogue/              # AI application catalogue
