@@ -25,11 +25,8 @@ from fastapi import FastAPI, HTTPException, Query, status
 
 from ai_engine.planner.task_planner import TaskPlanner
 from ai_engine.schemas.command_schema import CommandRequest
-from api.orchestrator import (
-    DuplicateRequestError,
-    TaskOrchestrator,
-    VoiceServiceUnavailableError,
-)
+from api.catalogue_routes import router as catalogue_router
+from api.orchestrator_instance import orchestrator
 from api.schemas import (
     AppCatalogueItem,
     CommandRunRequest,
@@ -59,8 +56,11 @@ app = FastAPI(
 # Global in-memory storage for active tasks
 tasks: Dict[str, Dict[str, Any]] = {}
 
-planner = TaskPlanner()
-orchestrator = TaskOrchestrator(planner=planner, tasks=tasks)
+from api.orchestrator_instance import orchestrator  # Shared orchestrator instance
+
+
+# Register additional routers
+app.include_router(catalogue_router)
 
 
 # ---------------------------------------------------------------------------

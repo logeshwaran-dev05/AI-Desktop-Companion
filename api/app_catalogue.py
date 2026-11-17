@@ -42,6 +42,11 @@ class CatalogueApp:
     allowlisted: bool = False
     aliases: List[str] = field(default_factory=list)
     description: str = ""
+    # Additional optional metadata
+    version: Optional[str] = None
+    publisher: Optional[str] = None
+    install_location: Optional[str] = None
+    uri_protocol: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -649,3 +654,5 @@ def resolve_application(target: str) -> Optional[Dict[str, Any]]:
     """Resolve an application identifier, name, or phrase to its catalogue entry."""
     return catalogue_service.resolve_phrase(target)
 
+# Compatibility alias for schemas import
+AppCatalogueItem = CatalogueApp  # noqa: N801

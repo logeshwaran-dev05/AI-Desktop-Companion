@@ -27,6 +27,7 @@ from api.app_catalogue import catalogue_service as _windows_catalogue
 from api.schemas import StructuredActionRequest
 from windows_automation.adapter import WindowsAutomationAdapter
 from windows_automation.schemas import AuthorizationDecision, ExecutionResult
+from api.task_repository import TaskRepository
 
 
 def current_iso_timestamp() -> str:
@@ -463,9 +464,33 @@ class TaskOrchestrator:
         adapter: Optional[WindowsAutomationAdapter] = None,
         tasks: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
-        self.planner = planner or TaskPlanner()
+        # Initialize components
+
         self.adapter = adapter or WindowsAutomationAdapter()
-        self.tasks: Dict[str, Dict[str, Any]] = tasks if tasks is not None else {}
+        # Initialize SQLite task repository
+        self.repo = TaskRepository()
+        # Load persisted tasks into in‑memory dict (or use provided dict)
+        if tasks is not None:
+            self.tasks: Dict[str, Dict[str, Any]] = tasks
+        else:
+            self.tasks = {t["task_id"]: t for t in self.repo.list_tasks()}
+        self.permission_evaluator = PermissionEvaluator()
+        self.resolver = ApplicationResolver()
+        self.state_machine = TaskStateMachine()
+        # In‑memory register mapping idempotency_key -> task_id
+        self._idempotency_registry: Dict[str, str] = {}
+
+    def _persist_task(self, task_id: str) -> None:
+        """Persist the current state of a task to SQLite."""
+        task = self.tasks.get(task_id)
+        if task:
+            self.repo.update_task(task_id, task)
+
+
+        self.adapter = adapter or WindowsAutomationAdapter()
+        self.repo = TaskRepository()
+        # Load persisted tasks into in‑memory dict for fast access
+        self.tasks: Dict[str, Dict[str, Any]] = tasks if tasks is not None else {t["task_id"]: t for t in self.repo.list_tasks()}
         self.permission_evaluator = PermissionEvaluator()
         self.resolver = ApplicationResolver()
         self.state_machine = TaskStateMachine()
@@ -924,6 +949,104 @@ class TaskOrchestrator:
         return all_tasks
 
     def execute_task(self, task_id: str, timeout_seconds: float = 10.0) -> Dict[str, Any]:
+        """Execute pending plan steps through policy evaluation, dispatch, and verification.
+        The task state is persisted to SQLite after each mutation.
+        """
+        task = self.tasks.get(task_id)
+        if not task:
+            raise KeyError(f"Task '{task_id}' not found.")
+
+        current_status = task["status"]
+
+        if current_status in self.state_machine.TERMINAL_STATES:
+            return task
+
+        steps = task.get("steps", [])
+        if not steps:
+            if current_status == "pending":
+                task["message"] = "No executable plan steps found for this task."
+                self._persist_task(task_id)
+            return task
+
+        for step_data in steps:
+            action_name = step_data.get("action", "")
+            target = step_data.get("target", "")
+            step_id = step_data.get("step_id", 1)
+
+            auth_dict = task.get("authorization")
+            if auth_dict and auth_dict.get("permission_status") == "granted":
+                auth = AuthorizationDecision.from_dict(auth_dict)
+            else:
+                auth = self.permission_evaluator.evaluate(task_id, action_name, target)
+                task["authorization"] = auth.to_dict()
+
+            if auth.permission_status == "requires_approval":
+                self.state_machine.transition(task, "requires_approval", auth.reason)
+                self._persist_task(task_id)
+                return task
+
+            if auth.permission_status == "denied":
+                self.state_machine.transition(task, "failed", auth.reason)
+                task["error_code"] = "ERR_PERMISSION_DENIED"
+                task["error_message"] = auth.reason
+                task["completed_at"] = current_iso_timestamp()
+                self._persist_task(task_id)
+                return task
+
+            self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
+            task["started_at"] = task["started_at"] or current_iso_timestamp()
+
+            plan_step = PlanStep(
+                step_id=step_id,
+                action=action_name,
+                target=target,
+                depends_on=step_data.get("depends_on", []),
+                expected_outcome=step_data.get("expected_outcome", ""),
+            )
+
+            exec_result: ExecutionResult = self.adapter.execute_plan_step(
+                step=plan_step,
+                task_id=task_id,
+                authorization=auth,
+                timeout_seconds=timeout_seconds,
+            )
+
+            task["active_action_id"] = exec_result.action_id
+
+            if exec_result.status == "completed":
+                self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
+                task["active_action_id"] = None
+                task["result"] = exec_result.to_dict()
+                task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
+                task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
+                task["duration_ms"] = exec_result.duration_ms
+                task["completed_at"] = exec_result.completed_at
+                task["message"] = f"Action '{action_name}' completed and verified successfully."
+                self._persist_task(task_id)
+                continue
+
+            elif exec_result.status == "cancelled":
+                self.state_machine.transition(task, "cancelled", "Action was cancelled.")
+                task["active_action_id"] = None
+                task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
+                task["error_message"] = exec_result.error_message or "Action was cancelled."
+                task["completed_at"] = exec_result.completed_at
+                self._persist_task(task_id)
+                return task
+
+            else:
+                self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
+                task["active_action_id"] = None
+                task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
+                task["error_message"] = exec_result.error_message or "Action execution failed."
+                task["duration_ms"] = exec_result.duration_ms
+                task["completed_at"] = exec_result.completed_at
+                self._persist_task(task_id)
+                return task
+
+        # All steps processed – ensure final persistence
+        self._persist_task(task_id)
+        return task
         """Execute pending plan steps through policy evaluation, dispatch, and verification."""
         task = self.tasks.get(task_id)
         if not task:
