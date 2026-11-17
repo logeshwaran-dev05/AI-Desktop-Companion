@@ -3,7 +3,8 @@ Unit tests for FastAPI API endpoints in api/main.py.
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict
+from unittest.mock import MagicMock
 
 from fastapi import HTTPException
 
@@ -38,8 +39,10 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(response["status"], "plan_ready")
         self.assertEqual(response["intent"], "open_application")
         self.assertFalse(response["requires_clarification"])
-        self.assertEqual(len(response["steps"]), 1)
-        self.assertEqual(response["steps"][0]["target"], "Notepad")
+        steps = response["steps"]
+        assert isinstance(steps, list)
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]["target"], "Notepad")
 
     def test_create_plan_requires_clarification(self):
         request = PlanRequest(text="Open")
@@ -123,7 +126,8 @@ class TestAPIEndpoints(unittest.TestCase):
 
         exec_res = main_module.execute_task(task_id, TaskExecuteRequest(timeout_seconds=5.0))
         self.assertEqual(exec_res["status"], "completed")
-        self.assertTrue(exec_res["verification"]["verified"])
+        verification: Dict[str, Any] = exec_res["verification"]  # type: ignore[assignment]
+        self.assertIs(verification["verified"], True)
         self.mock_adapter.execute_plan_step.assert_called_once()
 
     def test_approve_task_endpoint(self):
@@ -177,7 +181,9 @@ class TestAPIEndpoints(unittest.TestCase):
         request = CommandRunRequest(text="Open Notepad")
         run_res = main_module.run_command(request)
         self.assertEqual(run_res["status"], "completed")
-        self.assertTrue(run_res["task_id"].startswith("task_"))
+        task_id_res = run_res["task_id"]
+        assert task_id_res is not None
+        self.assertTrue(task_id_res.startswith("task_"))
 
 
 if __name__ == "__main__":

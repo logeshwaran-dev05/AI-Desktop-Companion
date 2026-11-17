@@ -122,6 +122,7 @@ class WindowsWindowVerifier:
                 window_details = finder(pid)
 
             if window_details is not None:
+                window_handle = window_details.get("window_handle", window_details.get("hwnd"))
                 return VerificationEvidence(
                     verified=True,
                     method="win32_window_enumeration",
@@ -131,7 +132,7 @@ class WindowsWindowVerifier:
                         "process_name": process_name,
                         "process_alive": True,
                         "window_found": True,
-                        "window_handle": window_details.get("hwnd"),
+                        "window_handle": window_handle,
                         "window_title": window_details.get("window_title", ""),
                         "window_class": window_details.get("window_class", ""),
                         "dimensions": {

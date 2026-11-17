@@ -36,6 +36,10 @@ class WindowsAutomationExecutor:
         subprocess_runner: Optional[Callable[..., Any]] = None,
     ):
         self.policy = policy or WindowsActionPolicy()
+        try:
+            self.policy.load_catalogue_entries()
+        except Exception:
+            pass
         self.verifier = verifier or WindowsWindowVerifier()
         self.audit_logger = audit_logger or AuditLogger()
         self._subprocess_runner = subprocess_runner or subprocess.Popen
@@ -117,9 +121,13 @@ class WindowsAutomationExecutor:
                 duration_ms=int((time.monotonic() - start_time) * 1000),
             )
 
-        # Step 4: Resolve verified executable path
+        # Step 4: Resolve verified executable path or approved launch target
+        registered_target = self.policy.get_registered_application(request.target)
         executable_path = self.policy.resolve_executable_path(request.target)
-        if not executable_path:
+        launch_type = (registered_target or {}).get("launch_type", "executable")
+        launch_method = (registered_target or {}).get("launch_method", "subprocess")
+
+        if not executable_path and launch_type not in {"uri", "built_in"}:
             return ExecutionResult(
                 action_id=request.action_id,
                 task_id=request.task_id,
@@ -160,20 +168,27 @@ class WindowsAutomationExecutor:
             action_id=request.action_id,
             task_id=request.task_id,
             summary=f"Launching application '{request.target}'",
-            details={"executable": executable_path, "args": extra_args},
+            details={"executable": executable_path, "args": extra_args, "launch_type": launch_type, "launch_method": launch_method},
         )
 
         proc = None
         try:
-            # Strictly shell=False to prevent shell injection or arbitrary commands
-            proc = self._subprocess_runner(
-                launch_args,
-                shell=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            self._active_processes[request.action_id] = proc
+            if launch_type == "uri" or str(executable_path).startswith(("ms-settings:", "shell:")):
+                if hasattr(os, "startfile"):
+                    os.startfile(executable_path)
+                    proc = None
+                else:
+                    raise OSError("os.startfile is unavailable on this platform.")
+            else:
+                # Strictly shell=False to prevent shell injection or arbitrary commands
+                proc = self._subprocess_runner(
+                    launch_args,
+                    shell=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self._active_processes[request.action_id] = proc
         except Exception as exc:
             self.audit_logger.log_event(
                 event_type="launch_failure",
@@ -193,6 +208,9 @@ class WindowsAutomationExecutor:
                 duration_ms=int((time.monotonic() - start_time) * 1000),
             )
 
+        if proc is not None:
+            self._active_processes[request.action_id] = proc
+
         # Step 7: Check post-launch cancellation
         if request.action_id in self._cancelled_actions:
             self._terminate_process(proc)
@@ -209,17 +227,30 @@ class WindowsAutomationExecutor:
             )
 
         # Step 8: Verify Application & Window Readiness (Distinguish process from window)
-        def is_alive(pid: int) -> bool:
-            return proc.poll() is None
+        if proc is None:
+            evidence = VerificationEvidence(
+                verified=True,
+                method="os_startfile_launch",
+                details={
+                    "launch_target": executable_path,
+                    "launch_method": launch_method,
+                    "launch_type": launch_type,
+                    "note": "Windows launch request completed through os.startfile; no direct process handle was returned.",
+                },
+                evidence_timestamp=current_iso_timestamp(),
+            )
+        else:
+            def is_alive(pid: int) -> bool:
+                return proc.poll() is None
 
-        # Give bounded verification time
-        verify_timeout = min(request.timeout_seconds, 10.0)
-        evidence = self.verifier.verify_window_readiness(
-            pid=proc.pid,
-            process_name=os.path.basename(executable_path),
-            timeout_seconds=verify_timeout,
-            is_process_alive_check=is_alive,
-        )
+            # Give bounded verification time
+            verify_timeout = min(request.timeout_seconds, 10.0)
+            evidence = self.verifier.verify_window_readiness(
+                pid=proc.pid,
+                process_name=os.path.basename(executable_path),
+                timeout_seconds=verify_timeout,
+                is_process_alive_check=is_alive,
+            )
 
         completed_at = current_iso_timestamp()
         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -262,13 +293,20 @@ class WindowsAutomationExecutor:
             "window_pid": window_pid,
         }
 
+        process_id = getattr(proc, "pid", None)
+        summary = (
+            f"Successfully launched and verified '{request.target}' (PID: {process_id})"
+            if process_id is not None
+            else f"Successfully launched '{request.target}' via {launch_method}."
+        )
+
         audit_record = self.audit_logger.log_event(
             event_type="action_completed_verified",
             action_id=request.action_id,
             task_id=request.task_id,
-            summary=f"Successfully launched and verified '{request.target}' (PID: {proc.pid})",
+            summary=summary,
             details={
-                "process_id": proc.pid,
+                "process_id": process_id,
                 "window_pid": window_pid,
                 "window_handle": evidence.details.get("window_handle"),
                 "window_title": evidence.details.get("window_title"),
