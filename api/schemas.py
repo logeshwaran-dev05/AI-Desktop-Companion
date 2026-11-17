@@ -7,6 +7,7 @@ in alignment with TEAM_CONTRACTS.md.
 """
 
 from typing import Any, Dict, List, Literal, Optional
+from api.app_catalogue import AppCatalogueItem  # re‑export for FastAPI imports
 from pydantic import BaseModel, Field
 
 
@@ -120,6 +121,40 @@ class TaskStatusResponse(BaseModel):
     message: Optional[str] = None
 
 
+
+
+class AppCapability(BaseModel):
+    """Returned by /catalogue/{app_id}/capabilities – lists the actions an
+    adapter declares for the given app."""
+    app_id: str = Field(..., description="Application identifier")
+    capabilities: List[str] = Field(..., description="Supported action names")
+
+
+
+class ApplicationInfo(BaseModel):
+    """Schema representing a discovered Windows application."""
+    application_id: str = Field(..., description="Stable identifier, e.g., lower‑cased name or product GUID")
+    name: str = Field(..., description="Human readable name")
+    category: Optional[str] = Field(None, description="One of the categories defined in the spec")
+    publisher: Optional[str] = Field(None, description="Publisher name if known")
+    version: Optional[str] = Field(None, description="Version string")
+    install_location: Optional[str] = Field(None, description="Base install folder")
+    executable_path: Optional[str] = Field(None, description="Full path to the executable or shortcut target")
+    process_name: Optional[str] = Field(None, description="Typical process name (e.g., notepad.exe)")
+    launch_method: Optional[str] = Field(None, description="How to launch: 'executable', 'shortcut', 'uri', 'store', etc.")
+    installed: bool = Field(True, description="True if the app is detected as installed")
+    discovery_status: Optional[str] = Field(None, description="Notes about discovery (e.g., 'shortcut broken')")
+
+# Alias for backward compatibility
+AppCatalogueItem = ApplicationInfo  # noqa: N801
+
+class LaunchTestResult(BaseModel):
+    """Result of a lightweight launch‑test for an application."""
+    app_id: str = Field(..., description="Application identifier")
+    status: str = Field(..., description="One of SUCCESS, FAILED, TIMEOUT, NOT_TESTED, NEEDS_USER_ACTION, UNSUPPORTED")
+    details: Optional[str] = Field(None, description="Human readable details or error message")
+
+
 class TaskResultResponse(BaseModel):
     """Task execution result response with verification evidence."""
     task_id: str
@@ -136,6 +171,7 @@ class TaskResultResponse(BaseModel):
     application_id: Optional[str] = None
     structured_request: Optional[Dict[str, Any]] = None
     completed_at: Optional[str] = None
+
 
 
 class TaskExecuteRequest(BaseModel):
@@ -232,13 +268,8 @@ class TaskSubmitResponse(BaseModel):
     structured_request: Optional[Dict[str, Any]] = None
 
 
-# ---------------------------------------------------------------------------
-# Application Catalogue Schemas
-# ---------------------------------------------------------------------------
+class RefreshResponse(BaseModel):
+    """Response model for catalogue refresh endpoint."""
+    status: str = Field(..., description="Result status, e.g., 'ok' or 'error'")
+    refreshed_at: str = Field(..., description="ISO timestamp of when the catalogue was refreshed")
 
-class AppCatalogueItem(BaseModel):
-    """Application catalogue entry."""
-    app_name: str
-    app_id: str
-    executable: str
-    allowlisted: bool = False
