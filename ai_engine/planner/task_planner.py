@@ -53,13 +53,21 @@ class TaskPlanner:
                 message="General question identified."
             )
 
-        # Step 4: Identify application launch commands
+        
+        
+        # Step 4: Identify natural language application commands
         pattern = (
             r"^(?:(?:please|can you|could you|would you)\s+)?"
-            r"(open|launch|start)\b\s*(.*)$"
+            r"(?:(open|launch|start|run|bring up)\b\s*|"
+            r"(?:i want to use|i need to use|"
+            r"i would like to use|i would like|"
+            r"i want|i need)\s+)"
+            r"(.*)$"
         )
 
         match = re.match(pattern, user_input)
+
+
 
         if not match:
             return PlannerResponse(

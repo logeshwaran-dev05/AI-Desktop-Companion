@@ -197,6 +197,69 @@ class TestTaskPlanner(unittest.TestCase):
         )
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.entities.application, "Notepad")
+    
+    # Natural language command tests
+
+    def test_i_want_to_use_notepad(self):
+        response = self.planner.process_command(
+            CommandRequest(text="I want to use Notepad")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "open_application")
+        self.assertEqual(response.entities.application, "Notepad")
+
+    def test_please_start_notepad(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Please start Notepad")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "Notepad")
+
+    def test_can_you_open_notepad(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Can you open Notepad?")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "Notepad")
+
+    def test_i_need_calculator(self):
+        response = self.planner.process_command(
+            CommandRequest(text="I need to use Calculator")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "Calculator")
+
+    def test_could_you_launch_chrome(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Could you launch Chrome?")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "Google Chrome")
+        # Additional command variation tests
+
+    def test_run_notepad(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Run Notepad")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "Notepad")
+
+    def test_bring_up_calculator(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Bring up Calculator")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "Calculator")
+
+    def test_please_run_chrome(self):
+        response = self.planner.process_command(
+            CommandRequest(text="Please run Chrome")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(
+            response.entities.application,
+            "Google Chrome"
+        )
 
 
 if __name__ == "__main__":
