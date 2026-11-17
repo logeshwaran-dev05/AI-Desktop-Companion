@@ -19,17 +19,17 @@
 
 ---
 
-## 2. Release Timeline — Target Submission: 6:30 PM IST
+## 2. Release Timeline — Target Submission: 6:30 PM IST (Pure Working Product)
 
 | Time (IST) | Milestone Goal | Expected Deliverable |
 | :--- | :--- | :--- |
 | **Tonight - 11:00 AM** | **Core Feature Completion** | Madhan finishes taskbar docking; Ram completes orchestrator status pipeline; New Dev finishes app/URL mappings. |
-| **11:00 AM - 12:30 PM** | **Pull Request Sync & Review** | All feature branches pushed and PRs opened against `main`. Team Lead code review. |
+| **11:00 AM - 12:30 PM** | **Pull Request Sync & Review** | All feature branches pushed and PRs opened against `main`. Team Lead code review & merge. |
 | **12:30 PM - 02:30 PM** | **End-to-End System Integration** | Connect Voice UI &rarr; Backend Orchestrator &rarr; Smart Fallback Launcher. |
-| **02:30 PM - 04:30 PM** | **Regression Testing & Bug Squash** | Full test runs using `Launch-Companion.bat`. Zero crash tolerance on common voice/text queries. |
-| **04:30 PM - 05:45 PM** | **Demo Recording & Documentation** | Record 2-minute video demonstrating desktop walking, taskbar docking, and opening YouTube/Notepad. |
-| **06:00 PM - 06:30 PM** | **🚀 Final Test Version Submission** | Tag release `v0.1.0-test` and submit to manager/evaluators (ahead of 7 PM). |
-| **06:30 PM - 07:00 PM** | **Buffer Window** | Safety margin for any unexpected deployment or connectivity hiccups. |
+| **02:30 PM - 04:30 PM** | **Live Real-World Testing** | Run `Launch-Companion.bat` on clean environments; test real Windows app launches + web fallbacks. |
+| **04:30 PM - 06:00 PM** | **Zero-Bug Stability & Build Freeze** | Edge case fixes, crash prevention, process verification checks, and final one-click build packaging. |
+| **06:00 PM - 06:30 PM** | **🚀 Working Product Submission** | Hand off tested, fully functional executable package to manager/evaluators. |
+| **06:30 PM - 07:00 PM** | **Safety Buffer Window** | Safety margin for live walkthrough and evaluator verification. |
 
 ---
 
