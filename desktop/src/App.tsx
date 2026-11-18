@@ -930,26 +930,37 @@ export default function App() {
     }
   }, [])
 
+  const handleApplyUpdate = useCallback(async () => {
+    if (!updateInfo) return
+    setIsUpdating(true)
+    setUpdateStatusMsg(`Downloading update v${updateInfo.remoteVersion} silently in background…`)
+    if (window.companionAPI?.applyUpdate) {
+      try {
+        const res = await window.companionAPI.applyUpdate(updateInfo)
+        setIsUpdating(false)
+        if (res.success) {
+          setIsUpdateReadyToRestart(true)
+          setUpdateStatusMsg('🎉 Update applied successfully! Restart companion to complete.')
+          voiceService.speakResponse('Companion updated successfully!')
+        } else {
+          setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
+        }
+      } catch (err) {
+        setIsUpdating(false)
+        setUpdateStatusMsg('Update error: ' + String(err))
+      }
+    }
+  }, [updateInfo])
+
   const handleCheckUpdates = useCallback(async () => {
     setUpdateStatusMsg('Checking GitHub for updates…')
     if (window.companionAPI?.checkUpdates) {
       try {
         const info = await window.companionAPI.checkUpdates()
+        setUpdateInfo(info)
         if (info.updateAvailable) {
-          setUpdateInfo(info)
-          setIsUpdating(true)
-          setUpdateStatusMsg(`Downloading v${info.remoteVersion} silently in background…`)
-          if (window.companionAPI.applyUpdate) {
-            const res = await window.companionAPI.applyUpdate(info)
-            setIsUpdating(false)
-            if (res.success) {
-              setIsUpdateReadyToRestart(true)
-              setUpdateStatusMsg('🎉 Update applied successfully! Restart companion to complete.')
-              voiceService.speakResponse('Companion updated successfully!')
-            } else {
-              setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
-            }
-          }
+          setUpdateStatusMsg(`ℹ️ Update v${info.remoteVersion} is available! Click "Update Now" to apply.`)
+          voiceService.speakResponse('A new software update is available.')
         } else if (info.error) {
           setUpdateStatusMsg(info.error)
         } else {
@@ -1019,16 +1030,37 @@ export default function App() {
               <AvatarCharacter state={animState} size={170} facing={facing} />
             </div>
             {!isSleeping && (
-              <button
-                type="button"
-                className="avatar-hint-pill"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleToggleFloatingChatbox()
-                }}
-              >
-                ✦ Click to chat
-              </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+                {updateInfo && updateInfo.updateAvailable && (
+                  <button
+                    type="button"
+                    className="avatar-hint-pill"
+                    style={{
+                      background: 'linear-gradient(135deg, #00E676, #00B4D8)',
+                      color: '#000',
+                      fontWeight: 700,
+                      boxShadow: '0 0 12px rgba(0, 230, 118, 0.7)',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (window.companionAPI?.openDashboard) window.companionAPI.openDashboard()
+                    }}
+                    title={`New update v${updateInfo.remoteVersion} available! Click to open Mission Control`}
+                  >
+                    ℹ️ Update v{updateInfo.remoteVersion}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="avatar-hint-pill"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleToggleFloatingChatbox()
+                  }}
+                >
+                  ✦ Click to chat
+                </button>
+              </div>
             )}
           </div>
         ) : (
@@ -1347,9 +1379,16 @@ export default function App() {
               type="button"
               className="mc-btn-pill"
               onClick={handleCheckUpdates}
-              title="Check for software updates from GitHub"
+              style={updateInfo && updateInfo.updateAvailable ? {
+                background: 'linear-gradient(135deg, #00E676, #00B4D8)',
+                color: '#000',
+                fontWeight: 700,
+                border: 'none',
+                boxShadow: '0 0 12px rgba(0, 230, 118, 0.6)'
+              } : {}}
+              title={updateInfo && updateInfo.updateAvailable ? `Update v${updateInfo.remoteVersion} is available! Click to inspect.` : "Check for software updates"}
             >
-              🔄 v{appVersion}
+              {updateInfo && updateInfo.updateAvailable ? `ℹ️ Update Available (v${updateInfo.remoteVersion})` : `🔄 v${appVersion}`}
             </button>
             <button
               type="button"
@@ -1433,7 +1472,8 @@ export default function App() {
                 ) : (
                   <button
                     type="button"
-                    onClick={handleCheckUpdates}
+                    disabled={isUpdating}
+                    onClick={handleApplyUpdate}
                     style={{
                       background: '#00E676',
                       color: '#000',
@@ -1442,7 +1482,7 @@ export default function App() {
                       padding: '8px 16px',
                       borderRadius: 6,
                       border: 'none',
-                      cursor: 'pointer',
+                      cursor: isUpdating ? 'wait' : 'pointer',
                       boxShadow: '0 2px 10px rgba(0, 230, 118, 0.3)',
                     }}
                   >
@@ -2079,7 +2119,9 @@ export default function App() {
               <div className="mc-card" style={{ gap: 12 }}>
                 <strong style={{ fontSize: 14 }}>Software Update &amp; Maintenance</strong>
                 <p style={{ fontSize: 12, color: 'var(--mc-text-muted)', margin: 0, lineHeight: 1.5 }}>
-                  Updates are automatically downloaded and applied silently in the background without needing to reinstall. No administrator elevation or separate setup files are required.
+                  {updateInfo && updateInfo.updateAvailable
+                    ? `ℹ️ Update v${updateInfo.remoteVersion} is available! (Current: v${appVersion}). ${updateInfo.releaseNotes}`
+                    : `You are running version v${appVersion}. Updates are checked automatically on startup and apply silently in the background with zero administrator prompts.`}
                 </p>
                 {updateStatusMsg && (
                   <div style={{ fontSize: 12, color: updateStatusMsg.includes('failed') || updateStatusMsg.includes('error') ? '#EF4444' : '#00E676', fontWeight: 600 }}>
@@ -2096,6 +2138,26 @@ export default function App() {
                     >
                       ⚡ Restart Companion
                     </button>
+                  ) : updateInfo && updateInfo.updateAvailable ? (
+                    <>
+                      <button
+                        type="button"
+                        className="mc-btn-pill"
+                        disabled={isUpdating}
+                        onClick={handleApplyUpdate}
+                        style={{ background: '#00E676', color: '#000', fontWeight: 700 }}
+                      >
+                        {isUpdating ? '⏳ Updating in Background…' : `⚡ Update Now (v${updateInfo.remoteVersion})`}
+                      </button>
+                      <button
+                        type="button"
+                        className="mc-btn-pill"
+                        onClick={handleCheckUpdates}
+                        disabled={isUpdating}
+                      >
+                        🔄 Re-check
+                      </button>
+                    </>
                   ) : (
                     <button
                       type="button"
@@ -2104,7 +2166,7 @@ export default function App() {
                       disabled={isUpdating}
                       style={{ background: '#00E676', color: '#000', fontWeight: 700 }}
                     >
-                      {isUpdating ? '⏳ Updating in Background…' : '🔄 Check for Updates Now'}
+                      {isUpdating ? '⏳ Checking…' : '🔄 Check for Updates Now'}
                     </button>
                   )}
                 </div>

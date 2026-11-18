@@ -614,25 +614,21 @@ app.whenReady().then(() => {
   createTray();
   console.log('[Electron] Started with Mission Control Dashboard and floating Doraemon companion.');
 
-  // 100% Silent Background Auto-Update 4 seconds after launch
+  // Automatic update check 4 seconds after launch
   setTimeout(async () => {
     try {
       const updateResult = await checkForUpdates();
       if (updateResult && updateResult.updateAvailable) {
-        console.log('[Updater] Background auto-update downloading v' + updateResult.remoteVersion);
-        const applyRes = await downloadAndApplyUpdate(updateResult);
-        if (applyRes && applyRes.success) {
-          console.log('[Updater] Background auto-update applied successfully!');
-          if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-            dashboardWindow.webContents.send('companion:update-completed', applyRes);
-          }
-          if (avatarWindow && !avatarWindow.isDestroyed()) {
-            avatarWindow.webContents.send('companion:update-completed', applyRes);
-          }
+        console.log('[Updater] Update available notice: v' + updateResult.remoteVersion);
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.webContents.send('companion:update-available', updateResult);
+        }
+        if (avatarWindow && !avatarWindow.isDestroyed()) {
+          avatarWindow.webContents.send('companion:update-available', updateResult);
         }
       }
     } catch (err) {
-      console.warn('[Updater] Silent startup auto-update check error:', err.message);
+      console.warn('[Updater] Silent startup update check notice:', err.message);
     }
   }, 4000);
 
