@@ -1,19 +1,20 @@
 # JM Vertex — AI Desktop Companion 🤖✨
 
 <p align="center">
-  <img src="desktop/public/doraemon/walk/walk_01.png" alt="Doraemon Desktop Companion" width="130" />
+  <img src="landing-page/assets/logo.jpg" alt="JM Vertex AI Companion Logo" width="380" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 230, 118, 0.25);" />
 </p>
 
 <p align="center">
-  <b>An interactive, intelligent 2D/3D desktop companion with animated avatar movement, taskbar docking, voice control, and verified multi-path Windows application execution.</b>
+  <b>YOUR SMART DESKTOP ASSISTANT</b><br/>
+  <i>An interactive, intelligent 2D/3D desktop companion with animated avatar movement, taskbar docking, voice control, and verified multi-path Windows application execution.</i>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white" alt="Windows" />
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-00E676?logo=windows&logoColor=black" alt="Windows" />
   <img src="https://img.shields.io/badge/Frontend-Electron%20%7C%20React%2019%20%7C%20Vite-61DAFB?logo=react&logoColor=black" alt="React" />
   <img src="https://img.shields.io/badge/Backend-Python%203.11%20%7C%20FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/AI%20Engine-Faster--Whisper%20%7C%20Task%20Planner-FF6F00?logo=openai&logoColor=white" alt="AI" />
-  <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License" />
+  <img src="https://img.shields.io/badge/Installer-Standalone%20.exe-00E676" alt="Installer" />
 </p>
 
 ---
@@ -136,11 +137,42 @@ npm --prefix desktop run build
 
 ---
 
+## 🌐 Web Landing Page & Laptop Distribution
+
+We provide a cyber-themed, high-conversion web landing page tailored for laptop downloads and live interactive demonstrations:
+
+* **Preview the Landing Page locally:**
+  ```powershell
+  npm run landing
+  # Opens at http://localhost:3000
+  ```
+* **Standalone 1-Click Installer Executable:**
+  - Located at: `landing-page/downloads/JM-Vertex-AI-Companion-Setup.exe`
+  - Installs to `%LocalAppData%\Programs\JM-Vertex`
+  - Validates specified laptop hardware signature (Machine UUID, 64-bit OS, Cores)
+  - Creates Desktop & Start Menu 1-click shortcuts
+* **Rebuild Installer Binary:**
+  ```powershell
+  npm run build:installer
+  # Or run directly: powershell -ExecutionPolicy Bypass -File ./build-installer.ps1
+  ```
+
+---
+
 ## 📂 Project Directory Structure
 
 ```text
 ├── Launch-Companion.bat        # One-click start script for backend + desktop UI
+├── build-installer.ps1         # Windows Setup (.exe) compiler pipeline
 ├── TEAM_CONTRACTS.md           # Role allocations, prompt guides & API contracts
+├── landing-page/               # Official web landing page for downloads
+│   ├── index.html              # Responsive landing page with interactive simulator
+│   ├── style.css               # Cyber Emerald Green (#00E676) design system
+│   ├── app.js                  # 8-frame walk animation & live test bench
+│   ├── downloads/              # Downloadable installer (JM-Vertex-AI-Companion-Setup.exe)
+│   └── assets/                 # Brand logo & Doraemon walk frames
+├── installer/                  # C# WinForms GUI installer wizard source
+│   └── SetupWizard.cs          # Laptop hardware scanning & shortcut generator
 ├── ai_engine/                  # Speech-to-text (Whisper), prompt parser, schemas
 │   ├── catalogue/              # AI application catalogue
 │   ├── planner/                # Task planner & step generator

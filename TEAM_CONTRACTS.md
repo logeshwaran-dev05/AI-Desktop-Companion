@@ -11,8 +11,8 @@
 
 | Member | Role | Primary Module Directory | Core Technical Responsibility |
 | :--- | :--- | :--- | :--- |
-| **Logeshwaran D** | **Team Lead & Automation Architect** | `windows_automation/`, `desktop/electron/` | Universal application discovery, smart multi-path fallback, Win32 process verification, release packaging |
-| **Madhan M** | **Frontend & Avatar Animation Lead** | `desktop/src/`, `desktop/public/` | Doraemon 8-frame walk cycle, taskbar docking UI, reactive expression states (Listening, Thinking, Success, Error) |
+| **Logeshwaran D** | **Team Lead & Automation Architect** | `windows_automation/`, `desktop/electron/`, `installer/`, `build-installer.ps1` | Universal application discovery, smart multi-path fallback, Win32 process verification, installer `.exe` packaging & laptop distribution |
+| **Madhan M** | **Frontend & Avatar Animation Lead** | `desktop/src/`, `desktop/public/`, `landing-page/` | Doraemon 8-frame walk cycle, taskbar docking UI, reactive expression states, web landing page styling & interactive animations |
 | **Hariram K S (Ram)** | **Senior Backend Orchestrator** | `api/` | FastAPI `/tasks` routes, async task lifecycle state machine, real-time polling/WebSocket sync, execution pipeline |
 | **New Backend Engineer** | **Intent & Application Fallback Engine** | `ai_engine/`, `api/` | Top-50 Web/PWA application mappings, search query parameter extractor, end-to-end integration tests |
 | **Booviha M** | **AI Engine Contributor** | `ai_engine/` | Prompt classification, Faster-Whisper voice transcription, plan step generation |
@@ -175,11 +175,35 @@ Each team member has a specific interface contract. Below are the exact instruct
   * `windows_automation/`
   * `desktop/electron/`
   * `Launch-Companion.bat`
+  * `installer/` & `build-installer.ps1`
   * Repository releases & PR merges
 * **Task Objective:**
   1. Maintain 100% passing tests on `windows_automation` (all 19 tests green).
   2. Implement smart multi-path execution in `appLauncher.cjs` (Native &rarr; Web URL &rarr; Web Search).
   3. Manage team branches, review pull requests, and ensure seamless one-click execution via `Launch-Companion.bat`.
+  4. Build and distribute the standalone `JM-Vertex-AI-Companion-Setup.exe` installer for specified laptops via `build-installer.ps1`.
+
+---
+
+### 🌐 Contract 5: Web Landing Page & Laptop Distribution (Madhan M & Logeshwaran D)
+
+* **Files Owned:**
+  * `landing-page/index.html` (Landing page markup, interactive simulator, specs)
+  * `landing-page/style.css` (Cyber Emerald Green theme `#00E676`, responsive design)
+  * `landing-page/app.js` (8-frame walk animation, command test bench, FAQ)
+  * `landing-page/downloads/` (`JM-Vertex-AI-Companion-Setup.exe` binary)
+  * `landing-page/assets/` (Official logo and walk cycle sprites)
+* **Testing & Local Preview:**
+  ```powershell
+  npm run landing
+  # Serves on http://localhost:3000
+  ```
+* **Release Checklist:**
+  - [x] Official JM Vertex AI Companion logo and emerald green brand concept incorporated.
+  - [x] Download button triggers instant download of `JM-Vertex-AI-Companion-Setup.exe`.
+  - [x] Interactive live simulator allows testing "Open YouTube", "Launch Spotify", "Open Notepad".
+  - [x] Laptop compatibility matrix displayed (Windows 10/11 64-bit, RAM, Mic).
+  - [x] Responsive layout tested for mobile, tablet, and desktop viewports.
 
 ---
 
