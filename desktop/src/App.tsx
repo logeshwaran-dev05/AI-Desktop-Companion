@@ -227,6 +227,12 @@ export default function App() {
   const [launchState, setLaunchState] = useState<LaunchState>('idle')
   const [currentLaunchResult, setCurrentLaunchResult] = useState<LaunchResult | null>(null)
 
+  // ── Auto-Updater & Software Versioning ──
+  const [updateInfo, setUpdateInfo] = useState<import('./companion').UpdateInfo | null>(null)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [updateStatusMsg, setUpdateStatusMsg] = useState('')
+  const [appVersion, setAppVersion] = useState('1.0.1')
+
   // ── Refs ──
   const avatarDragStart = useRef<{ screenX: number; screenY: number; moved: boolean } | null>(null)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
@@ -279,6 +285,25 @@ export default function App() {
         if (step.facing) setFacing(step.facing)
       })
 
+      if (window.companionAPI.getCurrentVersion) {
+        window.companionAPI.getCurrentVersion().then((v) => { if (v) setAppVersion(v) })
+      }
+
+      const cleanupUpdate = window.companionAPI.onUpdateAvailable?.((info) => {
+        setUpdateInfo(info)
+      })
+
+      const cleanupUpdateDone = window.companionAPI.onUpdateCompleted?.((res) => {
+        setIsUpdating(false)
+        if (res.success) {
+          setUpdateStatusMsg('🎉 Update applied successfully! Re-launch companion to enjoy new features.')
+          voiceService.speakResponse('Companion updated successfully!')
+          setUpdateInfo(null)
+        } else {
+          setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
+        }
+      })
+
       window.companionAPI.getExecutionMode?.().then((mode) => {
         if (mode) setExecutionMode(mode)
       })
@@ -286,6 +311,8 @@ export default function App() {
       return () => {
         cleanup()
         if (cleanupMove) cleanupMove()
+        if (cleanupUpdate) cleanupUpdate()
+        if (cleanupUpdateDone) cleanupUpdateDone()
       }
     }
   }, [])
@@ -893,6 +920,59 @@ export default function App() {
     }
   }, [isChatboxOpen, isSleeping])
 
+  // ── Auto-Updater Actions ───────────────────────────────────────────────────
+  const handleCheckUpdates = useCallback(async () => {
+    setUpdateStatusMsg('Checking GitHub for updates…')
+    if (window.companionAPI?.checkUpdates) {
+      try {
+        const info = await window.companionAPI.checkUpdates()
+        setUpdateInfo(info)
+        if (info.updateAvailable) {
+          setUpdateStatusMsg(`Update v${info.remoteVersion} is available!`)
+        } else if (info.error) {
+          setUpdateStatusMsg(info.error)
+        } else {
+          setUpdateStatusMsg(`You are on the latest version (v${info.currentVersion}).`)
+        }
+      } catch (err) {
+        setUpdateStatusMsg('Could not check updates: ' + String(err))
+      }
+    } else {
+      setUpdateStatusMsg('Update service is active in desktop mode.')
+    }
+  }, [])
+
+  const handleApplyUpdate = useCallback(async () => {
+    if (!updateInfo) return
+    setIsUpdating(true)
+    setUpdateStatusMsg('Downloading update package in background…')
+    if (window.companionAPI?.applyUpdate) {
+      try {
+        const res = await window.companionAPI.applyUpdate(updateInfo)
+        setIsUpdating(false)
+        if (res.success) {
+          setUpdateStatusMsg('🎉 Update applied successfully! Re-launch companion to enjoy new features.')
+          voiceService.speakResponse('Companion updated successfully!')
+          setUpdateInfo(null)
+        } else {
+          setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
+        }
+      } catch (err) {
+        setIsUpdating(false)
+        setUpdateStatusMsg('Update error: ' + String(err))
+      }
+    }
+  }, [updateInfo])
+
+  const handleManualDownload = useCallback(() => {
+    const manualUrl = updateInfo?.manualUrl || updateInfo?.setupExeUrl || 'https://logeshwaran-dev05.github.io/AI-Desktop-Companion/'
+    if (window.companionAPI?.openExternal) {
+      window.companionAPI.openExternal(manualUrl)
+    } else {
+      window.open(manualUrl, '_blank')
+    }
+  }, [updateInfo])
+
   // ── Send typed message ──────────────────────────────────────────────────────
   function sendMessage() {
     clearVoiceAutoEndTimer()
@@ -1275,6 +1355,14 @@ export default function App() {
             <button
               type="button"
               className="mc-btn-pill"
+              onClick={handleCheckUpdates}
+              title="Check for software updates from GitHub"
+            >
+              🔄 v{appVersion}
+            </button>
+            <button
+              type="button"
+              className="mc-btn-pill"
               onClick={() => {
                 if (window.companionAPI?.wakeAvatar) {
                   window.companionAPI.wakeAvatar()
@@ -1289,6 +1377,87 @@ export default function App() {
 
         {/* Dynamic Content Views */}
         <div className="mc-scroll-area">
+          {/* ════ SOFTWARE AUTO-UPDATE BANNER ════ */}
+          {updateInfo && updateInfo.updateAvailable && (
+            <div
+              className="mc-update-banner"
+              style={{
+                background: 'linear-gradient(90deg, rgba(0, 230, 118, 0.12), rgba(0, 180, 216, 0.12))',
+                border: '1px solid rgba(0, 230, 118, 0.65)',
+                borderRadius: 10,
+                padding: '12px 18px',
+                marginBottom: 16,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 12,
+                boxShadow: '0 4px 20px rgba(0, 230, 118, 0.15)',
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <strong style={{ color: '#00E676', fontSize: 14 }}>
+                    🚀 New Update Available: v{updateInfo.remoteVersion}
+                  </strong>
+                  <span style={{ fontSize: 11, background: 'rgba(0, 230, 118, 0.2)', color: '#00E676', padding: '1px 6px', borderRadius: 4 }}>
+                    Current: v{appVersion}
+                  </span>
+                </div>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--mc-text-muted)' }}>
+                  {updateInfo.releaseNotes}
+                </p>
+                {updateStatusMsg && (
+                  <div style={{ fontSize: 12, color: updateStatusMsg.includes('failed') || updateStatusMsg.includes('error') ? '#EF4444' : '#00E676', marginTop: 4, fontWeight: 600 }}>
+                    {updateStatusMsg}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  disabled={isUpdating}
+                  onClick={handleApplyUpdate}
+                  style={{
+                    background: '#00E676',
+                    color: '#000',
+                    fontWeight: 700,
+                    fontSize: 12,
+                    padding: '8px 16px',
+                    borderRadius: 6,
+                    border: 'none',
+                    cursor: isUpdating ? 'wait' : 'pointer',
+                    boxShadow: '0 2px 10px rgba(0, 230, 118, 0.3)',
+                  }}
+                >
+                  {isUpdating ? '⏳ Updating…' : '⚡ Auto-Update Now'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleManualDownload}
+                  title="If automatic update cannot download, get the installer directly in browser"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    color: '#FFF',
+                    fontSize: 12,
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  📥 Manual Download (.exe)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUpdateInfo(null)}
+                  style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 18, padding: '0 4px' }}
+                  title="Dismiss update banner"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
           {(notice || voiceError) && (
             <div className="chat-notice" role="status" style={{ margin: 0 }}>
               <span>ℹ</span> {voiceError || notice}
@@ -1894,13 +2063,44 @@ export default function App() {
 
                     {/* ════ TAB 6: GENERAL SETTINGS ════ */}
           {activeTab === 'General Settings' && (
-            <div className="mc-card" style={{ gap: 12 }}>
-              <strong style={{ fontSize: 14 }}>General System Configuration</strong>
-              <div style={{ fontSize: 12, color: 'var(--mc-text-muted)' }}>
-                <div><strong>Application:</strong> OmniCompanion AI Desktop Companion</div>
-                <div><strong>Architecture:</strong> Electron Multi-Window (Mission Control + Transparent Overlay)</div>
-                <div><strong>Version:</strong> 2.0.0 (Production Release)</div>
-                <div><strong>Windows Automation:</strong> ShellExecute + Allowlist Security Enforcement</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="mc-card" style={{ gap: 12 }}>
+                <strong style={{ fontSize: 14 }}>System &amp; Application Information</strong>
+                <div style={{ fontSize: 12, color: 'var(--mc-text-muted)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div><strong>Application:</strong> JM Vertex AI Desktop Companion</div>
+                  <div><strong>Installed Version:</strong> v{appVersion} (Smart Auto-Update Enabled)</div>
+                  <div><strong>Architecture:</strong> Electron Multi-Window (Mission Control + Transparent Overlay)</div>
+                  <div><strong>Windows Automation:</strong> ShellExecute + Allowlist Security Enforcement</div>
+                </div>
+              </div>
+
+              <div className="mc-card" style={{ gap: 12 }}>
+                <strong style={{ fontSize: 14 }}>Software Update &amp; Maintenance</strong>
+                <p style={{ fontSize: 12, color: 'var(--mc-text-muted)', margin: 0 }}>
+                  Updates are automatically downloaded and applied in the background without needing to reinstall. If automatic download is blocked by your network or firewall, you can download the setup executable directly.
+                </p>
+                {updateStatusMsg && (
+                  <div style={{ fontSize: 12, color: updateStatusMsg.includes('failed') || updateStatusMsg.includes('error') ? '#EF4444' : '#00E676', fontWeight: 600 }}>
+                    {updateStatusMsg}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                  <button
+                    type="button"
+                    className="mc-btn-pill"
+                    onClick={handleCheckUpdates}
+                    style={{ background: '#00E676', color: '#000', fontWeight: 700 }}
+                  >
+                    🔄 Check for Updates Now
+                  </button>
+                  <button
+                    type="button"
+                    className="mc-btn-pill"
+                    onClick={handleManualDownload}
+                  >
+                    📥 Download Installer Manually (.exe)
+                  </button>
+                </div>
               </div>
             </div>
           )}

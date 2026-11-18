@@ -44,4 +44,22 @@ contextBridge.exposeInMainWorld('companionAPI', {
     ipcRenderer.on('companion:movement-progress', sub);
     return () => ipcRenderer.removeListener('companion:movement-progress', sub);
   },
+
+  /**
+   * Auto-Updater & Version Management APIs
+   */
+  checkUpdates: () => ipcRenderer.invoke('companion:check-updates'),
+  applyUpdate: (updateInfo) => ipcRenderer.invoke('companion:apply-update', updateInfo),
+  openExternal: (url) => ipcRenderer.invoke('companion:open-external', url),
+  getCurrentVersion: () => ipcRenderer.invoke('companion:get-current-version'),
+  onUpdateAvailable: (callback) => {
+    const sub = (_e, data) => callback(data);
+    ipcRenderer.on('companion:update-available', sub);
+    return () => ipcRenderer.removeListener('companion:update-available', sub);
+  },
+  onUpdateCompleted: (callback) => {
+    const sub = (_e, data) => callback(data);
+    ipcRenderer.on('companion:update-completed', sub);
+    return () => ipcRenderer.removeListener('companion:update-completed', sub);
+  },
 });

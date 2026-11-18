@@ -41,6 +41,24 @@ export interface CompanionSyncData {
   chatboxOpen?: boolean;
 }
 
+export interface UpdateInfo {
+  updateAvailable: boolean;
+  currentVersion: string;
+  remoteVersion?: string;
+  releaseNotes?: string;
+  downloadUrl?: string;
+  setupExeUrl?: string;
+  manualUrl?: string;
+  error?: string;
+}
+
+export interface UpdateApplyResult {
+  success: boolean;
+  newVersion?: string;
+  error?: string;
+  manualUrl?: string;
+}
+
 export interface CompanionAPI {
   openDashboard: () => Promise<boolean>;
   closeDashboard: () => Promise<boolean>;
@@ -62,6 +80,13 @@ export interface CompanionAPI {
 
   onTaskProgress: (callback: (data: any) => void) => () => void;
   onMovementProgress: (callback: (data: MovementStep) => void) => () => void;
+
+  checkUpdates?: () => Promise<UpdateInfo>;
+  applyUpdate?: (updateInfo: UpdateInfo) => Promise<UpdateApplyResult>;
+  openExternal?: (url?: string) => Promise<boolean>;
+  getCurrentVersion?: () => Promise<string>;
+  onUpdateAvailable?: (callback: (info: UpdateInfo) => void) => () => void;
+  onUpdateCompleted?: (callback: (res: UpdateApplyResult) => void) => () => void;
 
   isElectron: boolean;
 }

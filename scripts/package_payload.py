@@ -7,7 +7,7 @@ def create_payload():
         os.remove(output_zip)
 
     include_dirs = ["api", "windows_automation", "ai_engine", "desktop/electron", "desktop/dist", "desktop/public"]
-    include_files = ["Launch-Companion.bat", "desktop/package.json", "package.json"]
+    include_files = ["Launch-Companion.bat", "desktop/package.json", "desktop/version.json", "package.json"]
 
     with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in include_files:

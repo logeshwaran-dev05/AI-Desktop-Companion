@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
 const { launchApp } = require('./appLauncher.cjs');
 const { resolveAppTarget } = require('./shortcutDiscovery.cjs');
 const { moveAvatarTo, returnHome, cancelActiveMovement } = require('./desktopMovement.cjs');
+const { checkForUpdates, downloadAndApplyUpdate, getCurrentVersion, FALLBACK_MANUAL_URL } = require('./updater.cjs');
 
 
 let dashboardWindow = null;
@@ -321,6 +322,55 @@ ipcMain.handle('companion:return-home', async () => {
   return false;
 });
 
+// -- Auto-Updater IPC Handlers -------------------------------------------------
+ipcMain.handle('companion:check-updates', async () => {
+  console.log('[Electron] Checking for updates...');
+  try {
+    return await checkForUpdates();
+  } catch (err) {
+    return {
+      updateAvailable: false,
+      currentVersion: getCurrentVersion(),
+      error: err.message,
+      manualUrl: FALLBACK_MANUAL_URL,
+    };
+  }
+});
+
+ipcMain.handle('companion:apply-update', async (_event, updateInfo) => {
+  console.log('[Electron] Applying update:', updateInfo);
+  try {
+    const result = await downloadAndApplyUpdate(updateInfo);
+    if (result.success) {
+      // Broadcast update completion
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        dashboardWindow.webContents.send('companion:update-completed', result);
+      }
+      if (avatarWindow && !avatarWindow.isDestroyed()) {
+        avatarWindow.webContents.send('companion:update-completed', result);
+      }
+    }
+    return result;
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message,
+      manualUrl: FALLBACK_MANUAL_URL,
+    };
+  }
+});
+
+ipcMain.handle('companion:open-external', async (_event, url) => {
+  const target = url || FALLBACK_MANUAL_URL;
+  console.log('[Electron] Opening external URL in browser:', target);
+  shell.openExternal(target);
+  return true;
+});
+
+ipcMain.handle('companion:get-current-version', () => {
+  return getCurrentVersion();
+});
+
 // -- Physical Desktop Movement & Launch Pipeline ---------------------------------
 ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayName, query }) => {
   console.log(`[Electron] Starting desktop task for "${appId}" (${displayName}) query="${query || ''}" in ${executionMode} mode`);
@@ -557,6 +607,24 @@ app.whenReady().then(() => {
   createAvatarWindow();
   createTray();
   console.log('[Electron] Started with Mission Control Dashboard and floating Doraemon companion.');
+
+  // Silent background update check 4 seconds after launch
+  setTimeout(async () => {
+    try {
+      const updateResult = await checkForUpdates();
+      if (updateResult && updateResult.updateAvailable) {
+        console.log('[Updater] Background check: New update available!', updateResult.remoteVersion);
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.webContents.send('companion:update-available', updateResult);
+        }
+        if (avatarWindow && !avatarWindow.isDestroyed()) {
+          avatarWindow.webContents.send('companion:update-available', updateResult);
+        }
+      }
+    } catch (err) {
+      console.warn('[Updater] Silent startup check failed:', err.message);
+    }
+  }, 4000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
