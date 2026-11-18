@@ -432,7 +432,12 @@ export default function App() {
     }
 
     if (taskCancelledRef.current) return
-    updateProgressStage('understanding', 'completed', `Identified target application: ${intent.displayName} (${intent.appId})`, 45)
+    const intentDetail = intent.query
+      ? (intent.actionType === 'play'
+          ? `Identified playback: "${intent.query}" on ${intent.displayName}`
+          : `Identified search query: "${intent.query}" on ${intent.displayName}`)
+      : `Identified target application: ${intent.displayName} (${intent.appId})`
+    updateProgressStage('understanding', 'completed', intentDetail, 45)
 
     updateProgressStage('validating', 'in_progress', `Validating ${intent.displayName} allowlist status…`, 55)
     await new Promise((r) => setTimeout(r, 250))
@@ -463,6 +468,7 @@ export default function App() {
         taskResult = await window.companionAPI.startDesktopTask({
           appId: intent.appId,
           displayName: intent.displayName,
+          query: intent.query,
         })
       } catch (err: unknown) {
         taskResult = {
@@ -571,11 +577,22 @@ export default function App() {
       setCurrentLaunchResult(result)
       setAvatarState('Success')
 
-      const successText = isMock
-        ? `[MOCK MODE] Simulated launch of ${taskResult.displayName}. Doraemon moved across the desktop to the shortcut target.`
+      let successText = isMock
+        ? `[MOCK MODE] Simulated action for ${taskResult.displayName}.`
         : `${taskResult.displayName} opened! Doraemon traveled across the desktop and launched the application.`
+      let spokenText = `${taskResult.displayName} opened successfully.`
 
-      voiceService.speakResponse(`${taskResult.displayName} opened successfully.`)
+      if (intent.query) {
+        if (intent.actionType === 'play') {
+          successText = `Playing "${intent.query}" on ${taskResult.displayName}! Doraemon queued your request.`
+          spokenText = `Playing ${intent.query} on ${intent.displayName}`
+        } else {
+          successText = `Searching for "${intent.query}" on ${taskResult.displayName}!`
+          spokenText = `Searching for ${intent.query}`
+        }
+      }
+
+      voiceService.speakResponse(spokenText)
 
       setMessages((prev) => [
         ...prev,

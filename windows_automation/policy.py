@@ -60,6 +60,33 @@ class WindowsActionPolicy:
     def __init__(self, catalogue: Optional[ApplicationCatalogue] = None):
         self.catalogue = catalogue or ApplicationCatalogue()
 
+    @property
+    def ALLOWLISTED_APPLICATIONS(self) -> Set[str]:
+        if not self.catalogue:
+            return set()
+        return {r.app_id for r in self.catalogue.get_all()}
+
+    def register_application(
+        self,
+        app_id: str,
+        canonical_name: str,
+        executable_name: Optional[str] = None,
+        known_paths: Optional[List[str]] = None,
+        **kwargs
+    ) -> None:
+        if not self.catalogue:
+            self.catalogue = ApplicationCatalogue()
+        exe = (known_paths and known_paths[0]) or executable_name or f"{app_id}.exe"
+        record = ApplicationRecord(
+            app_id=app_id,
+            display_name=canonical_name,
+            normalized_name=canonical_name.strip().lower(),
+            executable_path=exe,
+            source="system_builtin",
+            aliases=[canonical_name.lower(), app_id.lower()],
+        )
+        self.catalogue.register(record)
+
     def load_catalogue_entries(self, entries: Optional[List[Any]] = None) -> None:
         """Loads and registers catalogue entries for testing or runtime discovery."""
         if not self.catalogue:

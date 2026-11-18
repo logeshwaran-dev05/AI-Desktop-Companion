@@ -330,13 +330,13 @@ class WindowsAutomationExecutor:
             return True
 
         verify_timeout = min(request.timeout_seconds, 10.0)
-        app_name = os.path.basename(resolved_path) if resolved_path else request.target
-        if request.resolved_record and request.resolved_record.display_name:
-            app_name = request.resolved_record.display_name
+        proc_name = os.path.basename(resolved_path) if resolved_path else request.target
+        if not proc_name.lower().endswith(".exe"):
+            proc_name = f"{proc_name.lower()}.exe"
 
         evidence = self.verifier.verify_window_readiness(
             pid=spawned_pid or 0,
-            process_name=app_name,
+            process_name=proc_name,
             timeout_seconds=verify_timeout,
             is_process_alive_check=is_alive,
         )

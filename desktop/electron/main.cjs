@@ -272,10 +272,10 @@ function createTray() {
 // -- App Launcher IPC Handler --------------------------------------------------
 // Accepts only an app identifier string against an explicit allowlist.
 // Never executes arbitrary shell commands from the renderer.
-ipcMain.handle('companion:launch-app', async (_event, appId) => {
-  console.log('[Electron] companion:launch-app requested for:', appId);
+ipcMain.handle('companion:launch-app', async (_event, appId, options) => {
+  console.log('[Electron] companion:launch-app requested for:', appId, options);
   try {
-    const result = await launchApp(appId);
+    const result = await launchApp(appId, options);
     console.log('[Electron] companion:launch-app result:', result);
     return result;
   } catch (err) {
@@ -322,8 +322,8 @@ ipcMain.handle('companion:return-home', async () => {
 });
 
 // -- Physical Desktop Movement & Launch Pipeline ---------------------------------
-ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayName }) => {
-  console.log(`[Electron] Starting desktop task for "${appId}" (${displayName}) in ${executionMode} mode`);
+ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayName, query }) => {
+  console.log(`[Electron] Starting desktop task for "${appId}" (${displayName}) query="${query || ''}" in ${executionMode} mode`);
 
   // Step 1: Discovered Desktop Shortcut or Calculated Destination
   const targetInfo = resolveAppTarget(appId);
@@ -404,7 +404,7 @@ ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayNa
       message: `[MOCK MODE] Simulated launch of ${displayName || appId}. No real Windows process was started.`,
     };
   } else {
-    launchResult = await launchApp(appId);
+    launchResult = await launchApp(appId, { query });
   }
 
   // Step 4: Verification and Celebration

@@ -105,8 +105,16 @@ export interface LaunchResult {
   cancelled?: boolean
 }
 
-/** Allowlist of recognizable phrases → app identifier */
+export interface ResolvedIntent {
+  appId: string
+  displayName: string
+  query?: string
+  actionType: 'open' | 'play' | 'search'
+}
+
+/** Allowlist of recognizable phrases → app identifier (Top-50 Apps & Services) */
 const PHRASE_MAP: Array<{ patterns: RegExp[]; appId: string; displayName: string }> = [
+  // ── Native Windows Utilities ──
   {
     patterns: [/notepad/i],
     appId: 'notepad',
@@ -123,9 +131,14 @@ const PHRASE_MAP: Array<{ patterns: RegExp[]; appId: string; displayName: string
     displayName: 'File Explorer',
   },
   {
-    patterns: [/chrome|google\s*chrome|browser/i],
+    patterns: [/chrome|google\s*chrome/i],
     appId: 'chrome',
     displayName: 'Google Chrome',
+  },
+  {
+    patterns: [/edge|microsoft\s*edge/i],
+    appId: 'edge',
+    displayName: 'Microsoft Edge',
   },
   {
     patterns: [/vs\s*code|vscode|visual\s*studio\s*code|code/i],
@@ -133,49 +146,125 @@ const PHRASE_MAP: Array<{ patterns: RegExp[]; appId: string; displayName: string
     displayName: 'Visual Studio Code',
   },
   {
-    patterns: [/whats\s*app|whatsapp/i],
-    appId: 'whatsapp',
-    displayName: 'WhatsApp',
+    patterns: [/paint|draw(ing)?|mspaint/i],
+    appId: 'paint',
+    displayName: 'Paint',
   },
+  {
+    patterns: [/cmd|command\s*prompt/i],
+    appId: 'cmd',
+    displayName: 'Command Prompt',
+  },
+  {
+    patterns: [/powershell|pwsh|terminal/i],
+    appId: 'terminal',
+    displayName: 'Terminal',
+  },
+  {
+    patterns: [/settings|control\s*panel/i],
+    appId: 'settings',
+    displayName: 'Windows Settings',
+  },
+
+  // ── Media & Entertainment ──
   {
     patterns: [/you\s*tube|youtube|yt\b/i],
     appId: 'youtube',
     displayName: 'YouTube',
   },
   {
-    patterns: [/spotify|music|songs?/i],
+    patterns: [/spotify/i],
     appId: 'spotify',
     displayName: 'Spotify',
   },
   {
-    patterns: [/netflix|movies?|series/i],
+    patterns: [/netflix/i],
     appId: 'netflix',
     displayName: 'Netflix',
   },
+  {
+    patterns: [/prime\s*video|amazon\s*prime/i],
+    appId: 'primevideo',
+    displayName: 'Prime Video',
+  },
+  {
+    patterns: [/disney\s*\+?|hotstar/i],
+    appId: 'disney',
+    displayName: 'Disney+',
+  },
+  {
+    patterns: [/sound\s*cloud/i],
+    appId: 'soundcloud',
+    displayName: 'SoundCloud',
+  },
+  {
+    patterns: [/twitch/i],
+    appId: 'twitch',
+    displayName: 'Twitch',
+  },
+
+  // ── AI & Assistants ──
   {
     patterns: [/chat\s*gpt|chatgpt|openai/i],
     appId: 'chatgpt',
     displayName: 'ChatGPT',
   },
   {
-    patterns: [/git\s*hub|github/i],
-    appId: 'github',
-    displayName: 'GitHub',
+    patterns: [/claude|anthropic/i],
+    appId: 'claude',
+    displayName: 'Claude',
   },
   {
-    patterns: [/g\s*mail|gmail|google\s*mail|emails?/i],
+    patterns: [/gemini|google\s*bard/i],
+    appId: 'gemini',
+    displayName: 'Google Gemini',
+  },
+  {
+    patterns: [/copilot|bing\s*chat/i],
+    appId: 'copilot',
+    displayName: 'Microsoft Copilot',
+  },
+
+  // ── Productivity & Cloud ──
+  {
+    patterns: [/g\s*mail|gmail|google\s*mail/i],
     appId: 'gmail',
     displayName: 'Gmail',
   },
   {
-    patterns: [/paint|draw(ing)?|mspaint/i],
-    appId: 'paint',
-    displayName: 'Paint',
+    patterns: [/google\s*drive|g\s*drive|drive/i],
+    appId: 'drive',
+    displayName: 'Google Drive',
   },
   {
-    patterns: [/cmd|terminal|command\s*prompt|powershell/i],
-    appId: 'cmd',
-    displayName: 'Command Prompt',
+    patterns: [/google\s*docs|docs/i],
+    appId: 'docs',
+    displayName: 'Google Docs',
+  },
+  {
+    patterns: [/google\s*sheets|sheets/i],
+    appId: 'sheets',
+    displayName: 'Google Sheets',
+  },
+  {
+    patterns: [/notion/i],
+    appId: 'notion',
+    displayName: 'Notion',
+  },
+  {
+    patterns: [/slack/i],
+    appId: 'slack',
+    displayName: 'Slack',
+  },
+  {
+    patterns: [/trello/i],
+    appId: 'trello',
+    displayName: 'Trello',
+  },
+  {
+    patterns: [/canva/i],
+    appId: 'canva',
+    displayName: 'Canva',
   },
   {
     patterns: [/maps|google\s*maps|directions/i],
@@ -183,9 +272,73 @@ const PHRASE_MAP: Array<{ patterns: RegExp[]; appId: string; displayName: string
     displayName: 'Google Maps',
   },
   {
-    patterns: [/canva/i],
-    appId: 'canva',
-    displayName: 'Canva',
+    patterns: [/calendar|google\s*calendar/i],
+    appId: 'calendar',
+    displayName: 'Google Calendar',
+  },
+
+  // ── Developer Platforms ──
+  {
+    patterns: [/git\s*hub|github/i],
+    appId: 'github',
+    displayName: 'GitHub',
+  },
+  {
+    patterns: [/git\s*lab|gitlab/i],
+    appId: 'gitlab',
+    displayName: 'GitLab',
+  },
+  {
+    patterns: [/stack\s*overflow/i],
+    appId: 'stackoverflow',
+    displayName: 'Stack Overflow',
+  },
+
+  // ── Communication & Social ──
+  {
+    patterns: [/whats\s*app|whatsapp/i],
+    appId: 'whatsapp',
+    displayName: 'WhatsApp',
+  },
+  {
+    patterns: [/discord/i],
+    appId: 'discord',
+    displayName: 'Discord',
+  },
+  {
+    patterns: [/telegram/i],
+    appId: 'telegram',
+    displayName: 'Telegram',
+  },
+  {
+    patterns: [/linkedin/i],
+    appId: 'linkedin',
+    displayName: 'LinkedIn',
+  },
+  {
+    patterns: [/twitter|\bx\b|tweet/i],
+    appId: 'twitter',
+    displayName: 'X (Twitter)',
+  },
+  {
+    patterns: [/reddit/i],
+    appId: 'reddit',
+    displayName: 'Reddit',
+  },
+  {
+    patterns: [/instagram|insta\b/i],
+    appId: 'instagram',
+    displayName: 'Instagram',
+  },
+  {
+    patterns: [/facebook|fb\b/i],
+    appId: 'facebook',
+    displayName: 'Facebook',
+  },
+  {
+    patterns: [/google/i],
+    appId: 'google',
+    displayName: 'Google',
   },
 ]
 
@@ -247,22 +400,128 @@ export function createInitialTaskProgress(
 }
 
 /**
- * Resolve a natural-language command string to a known app identifier.
- * Returns null if no known app is found in the text.
+ * Resolve a natural-language command string to an application intent,
+ * extracting query parameters for YouTube playback, web search, or app execution.
  */
-export function resolveAppIntent(text: string): { appId: string; displayName: string } | null {
+export function resolveAppIntent(rawText: string): ResolvedIntent {
+  const text = (rawText || '').trim()
+  if (!text) {
+    return {
+      appId: 'google',
+      displayName: 'Google Search',
+      query: '',
+      actionType: 'search',
+    }
+  }
+
+  // 1. YouTube playback patterns:
+  // e.g. "open youtube and play faded", "play believer on youtube", "play faded"
+  const ytPlayMatch1 = text.match(/(?:open|launch|start|go to)?\s*(?:youtube|yt)\s*(?:and|then)?\s*(?:play|stream|listen to)\s+(.+)$/i)
+  if (ytPlayMatch1 && ytPlayMatch1[1]?.trim()) {
+    return {
+      appId: 'youtube',
+      displayName: 'YouTube',
+      query: ytPlayMatch1[1].trim(),
+      actionType: 'play',
+    }
+  }
+
+  const ytPlayMatch2 = text.match(/(?:play|stream|listen to)\s+(.+?)\s+(?:on|in)\s+(?:youtube|yt)$/i)
+  if (ytPlayMatch2 && ytPlayMatch2[1]?.trim()) {
+    return {
+      appId: 'youtube',
+      displayName: 'YouTube',
+      query: ytPlayMatch2[1].trim(),
+      actionType: 'play',
+    }
+  }
+
+  // 2. Spotify playback patterns:
+  // e.g. "open spotify and play coldplay", "play starboy on spotify"
+  const spotifyPlayMatch1 = text.match(/(?:open|launch|start)?\s*spotify\s*(?:and|then)?\s*(?:play|stream|listen to)\s+(.+)$/i)
+  if (spotifyPlayMatch1 && spotifyPlayMatch1[1]?.trim()) {
+    return {
+      appId: 'spotify',
+      displayName: 'Spotify',
+      query: spotifyPlayMatch1[1].trim(),
+      actionType: 'play',
+    }
+  }
+
+  const spotifyPlayMatch2 = text.match(/(?:play|stream|listen to)\s+(.+?)\s+(?:on|in)\s+spotify$/i)
+  if (spotifyPlayMatch2 && spotifyPlayMatch2[1]?.trim()) {
+    return {
+      appId: 'spotify',
+      displayName: 'Spotify',
+      query: spotifyPlayMatch2[1].trim(),
+      actionType: 'play',
+    }
+  }
+
+  // 3. Generic "play <song/artist>" without app specified -> Defaults seamlessly to YouTube
+  const genericPlayMatch = text.match(/^(?:please\s+)?(?:play|stream|listen to)\s+(.+)$/i)
+  if (genericPlayMatch && genericPlayMatch[1]?.trim()) {
+    return {
+      appId: 'youtube',
+      displayName: 'YouTube',
+      query: genericPlayMatch[1].trim(),
+      actionType: 'play',
+    }
+  }
+
+  // 4. Targeted Search Patterns:
+  // e.g. "search python tutorials on google", "search react on youtube"
+  const searchMatchTargeted = text.match(/^(?:please\s+)?(?:search|find|look up)\s+(.+?)\s+(?:on|in)\s+(google|youtube|yt|github|maps)$/i)
+  if (searchMatchTargeted && searchMatchTargeted[1]?.trim()) {
+    const target = searchMatchTargeted[2].toLowerCase()
+    const appId = target.includes('yt') || target.includes('youtube') ? 'youtube' : target === 'github' ? 'github' : target === 'maps' ? 'maps' : 'google'
+    const displayName = appId === 'youtube' ? 'YouTube' : appId === 'github' ? 'GitHub' : appId === 'maps' ? 'Google Maps' : 'Google'
+    return {
+      appId,
+      displayName,
+      query: searchMatchTargeted[1].trim(),
+      actionType: 'search',
+    }
+  }
+
+  // 5. Generic Search Patterns:
+  // e.g. "search python roadmap", "google machine learning"
+  const genericSearchMatch = text.match(/^(?:please\s+)?(?:search(?:\s+for)?|google|look up|find)\s+(.+)$/i)
+  if (genericSearchMatch && genericSearchMatch[1]?.trim()) {
+    return {
+      appId: 'google',
+      displayName: 'Google',
+      query: genericSearchMatch[1].trim(),
+      actionType: 'search',
+    }
+  }
+
+  // 6. Direct Application Launch from Allowlist
   for (const entry of PHRASE_MAP) {
     for (const pattern of entry.patterns) {
       if (pattern.test(text)) {
-        return { appId: entry.appId, displayName: entry.displayName }
+        return {
+          appId: entry.appId,
+          displayName: entry.displayName,
+          actionType: 'open',
+        }
       }
     }
   }
-  return null
+
+  // 7. Universal Smart Search Fallback:
+  // For any command or question (e.g. "what is the weather", "who is alan turing", etc.),
+  // provide a graceful, instant Google search instead of failing or throwing errors.
+  return {
+    appId: 'google',
+    displayName: 'Google Search',
+    query: text.replace(/^(?:please\s+)?(?:tell me|what is|who is|where is|how to)\s+/i, '').trim() || text,
+    actionType: 'search',
+  }
 }
 
 /** Check whether the text looks like a "launch / open application" intent */
 export function isLaunchIntent(text: string): boolean {
-  if (/\b(open|launch|start|run|show|access)\b/i.test(text)) return true
+  if (/\b(open|launch|start|run|show|access|play|stream|search|find|google)\b/i.test(text)) return true
   return resolveAppIntent(text) !== null
 }

@@ -130,6 +130,40 @@ const APP_REGISTRY = [
     type: 'web',
   },
   {
+    id: 'primevideo',
+    displayName: 'Prime Video',
+    aliases: ['prime video', 'amazon prime', 'primevideo'],
+    webUrl: 'https://www.primevideo.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'disney',
+    displayName: 'Disney+',
+    aliases: ['disney', 'disney+', 'hotstar', 'disney plus'],
+    webUrl: 'https://www.disneyplus.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'soundcloud',
+    displayName: 'SoundCloud',
+    aliases: ['soundcloud', 'sound cloud'],
+    webUrl: 'https://soundcloud.com',
+    searchUrl: 'https://soundcloud.com/search?q=',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'twitch',
+    displayName: 'Twitch',
+    aliases: ['twitch', 'stream'],
+    webUrl: 'https://www.twitch.tv',
+    searchUrl: 'https://www.twitch.tv/search?term=',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
     id: 'chatgpt',
     displayName: 'ChatGPT',
     aliases: ['chatgpt', 'chat gpt', 'ai chat', 'openai'],
@@ -138,10 +172,52 @@ const APP_REGISTRY = [
     type: 'web',
   },
   {
+    id: 'claude',
+    displayName: 'Claude',
+    aliases: ['claude', 'anthropic'],
+    webUrl: 'https://claude.ai',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'gemini',
+    displayName: 'Google Gemini',
+    aliases: ['gemini', 'google bard', 'bard'],
+    webUrl: 'https://gemini.google.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'copilot',
+    displayName: 'Microsoft Copilot',
+    aliases: ['copilot', 'bing chat', 'ms copilot'],
+    webUrl: 'https://copilot.microsoft.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
     id: 'github',
     displayName: 'GitHub',
     aliases: ['github', 'git', 'repo', 'repositories'],
     webUrl: 'https://github.com',
+    searchUrl: 'https://github.com/search?q=',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'gitlab',
+    displayName: 'GitLab',
+    aliases: ['gitlab'],
+    webUrl: 'https://gitlab.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'stackoverflow',
+    displayName: 'Stack Overflow',
+    aliases: ['stack overflow', 'stackoverflow', 'stack'],
+    webUrl: 'https://stackoverflow.com',
+    searchUrl: 'https://stackoverflow.com/search?q=',
     processNames: BROWSER_PROCESSES,
     type: 'web',
   },
@@ -150,6 +226,54 @@ const APP_REGISTRY = [
     displayName: 'Gmail',
     aliases: ['gmail', 'google mail', 'emails', 'inbox'],
     webUrl: 'https://mail.google.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'drive',
+    displayName: 'Google Drive',
+    aliases: ['drive', 'google drive', 'gdrive'],
+    webUrl: 'https://drive.google.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'docs',
+    displayName: 'Google Docs',
+    aliases: ['docs', 'google docs', 'document'],
+    webUrl: 'https://docs.new',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'sheets',
+    displayName: 'Google Sheets',
+    aliases: ['sheets', 'google sheets', 'spreadsheet'],
+    webUrl: 'https://sheets.new',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'notion',
+    displayName: 'Notion',
+    aliases: ['notion'],
+    webUrl: 'https://www.notion.so',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'slack',
+    displayName: 'Slack',
+    aliases: ['slack'],
+    webUrl: 'https://slack.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'trello',
+    displayName: 'Trello',
+    aliases: ['trello'],
+    webUrl: 'https://trello.com',
     processNames: BROWSER_PROCESSES,
     type: 'web',
   },
@@ -179,6 +303,40 @@ const APP_REGISTRY = [
     type: 'web',
   },
   {
+    id: 'twitter',
+    displayName: 'X (Twitter)',
+    aliases: ['twitter', 'x', 'tweet'],
+    webUrl: 'https://x.com',
+    searchUrl: 'https://x.com/search?q=',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'reddit',
+    displayName: 'Reddit',
+    aliases: ['reddit'],
+    webUrl: 'https://www.reddit.com',
+    searchUrl: 'https://www.reddit.com/search/?q=',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'instagram',
+    displayName: 'Instagram',
+    aliases: ['instagram', 'insta'],
+    webUrl: 'https://www.instagram.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'facebook',
+    displayName: 'Facebook',
+    aliases: ['facebook', 'fb'],
+    webUrl: 'https://www.facebook.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
     id: 'maps',
     displayName: 'Google Maps',
     aliases: ['maps', 'google maps', 'navigation', 'directions'],
@@ -186,6 +344,30 @@ const APP_REGISTRY = [
     searchUrl: 'https://maps.google.com/maps?q=',
     processNames: BROWSER_PROCESSES,
     type: 'web',
+  },
+  {
+    id: 'calendar',
+    displayName: 'Google Calendar',
+    aliases: ['calendar', 'google calendar', 'schedule'],
+    webUrl: 'https://calendar.google.com',
+    processNames: BROWSER_PROCESSES,
+    type: 'web',
+  },
+  {
+    id: 'terminal',
+    displayName: 'Terminal',
+    aliases: ['terminal', 'powershell', 'pwsh'],
+    launchCommand: 'cmd.exe /c start powershell',
+    processNames: ['powershell.exe', 'WindowsTerminal.exe', 'conhost.exe'],
+    type: 'native',
+  },
+  {
+    id: 'settings',
+    displayName: 'Windows Settings',
+    aliases: ['settings', 'control panel', 'config'],
+    launchCommand: 'cmd.exe /c start ms-settings:',
+    processNames: ['SystemSettings.exe'],
+    type: 'native',
   },
 ];
 
@@ -268,7 +450,7 @@ function launchApp(appId, options = {}) {
       resolve({
         success: true,
         verified,
-        displayName: `${appEntry.displayName} (Browser)`,
+        displayName: options.query ? `${appEntry.displayName}: "${options.query}"` : `${appEntry.displayName}`,
         mode: 'real',
       });
       return;
@@ -276,6 +458,34 @@ function launchApp(appId, options = {}) {
 
     // 3. Handle Native or Hybrid apps (e.g. Notepad, Calculator, WhatsApp, Spotify)
     if (appEntry) {
+      // If query is requested for a hybrid app like Spotify with searchUrl
+      if (options.query && appEntry.searchUrl) {
+        if (appEntry.id === 'spotify') {
+          exec(`cmd.exe /c start spotify:search:${encodeURIComponent(options.query)}`, { windowsHide: false }, () => {});
+          const isNative = await waitForProcess(appEntry.processNames, 1500);
+          if (isNative) {
+            resolve({
+              success: true,
+              verified: true,
+              displayName: `${appEntry.displayName}: "${options.query}"`,
+              mode: 'real',
+            });
+            return;
+          }
+        }
+        // Fallback to web search
+        const webSearchUrl = `${appEntry.searchUrl}${encodeURIComponent(options.query)}`;
+        await openBrowserUrl(webSearchUrl);
+        const isBrowserRunning = await waitForProcess(BROWSER_PROCESSES, 2500);
+        resolve({
+          success: true,
+          verified: isBrowserRunning,
+          displayName: `${appEntry.displayName}: "${options.query}"`,
+          mode: 'real',
+        });
+        return;
+      }
+
       console.log(`[Launcher] Attempting native launch for ${appEntry.displayName}`);
       exec(appEntry.launchCommand, { windowsHide: false }, () => {});
 
@@ -319,16 +529,17 @@ function launchApp(appId, options = {}) {
       return;
     }
 
-    // 4. Universal Fallback: Unrecognized command -> Search Google or YouTube
-    console.log(`[Launcher] No local app registered for "${rawTarget}". Triggering smart search fallback.`);
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(rawTarget)}`;
+    // 4. Universal Fallback: Unrecognized command -> Search Google
+    const queryTerm = options.query || rawTarget;
+    console.log(`[Launcher] No local app registered for "${rawTarget}". Triggering smart search fallback for: ${queryTerm}`);
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(queryTerm)}`;
     await openBrowserUrl(searchUrl);
     const browserVerified = await waitForProcess(BROWSER_PROCESSES, 2500);
 
     resolve({
       success: true,
       verified: browserVerified,
-      displayName: `Web Search: "${rawTarget}"`,
+      displayName: `Google Search: "${queryTerm}"`,
       mode: 'fallback-web',
     });
   });

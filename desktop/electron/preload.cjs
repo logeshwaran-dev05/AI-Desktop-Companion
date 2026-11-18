@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('companionAPI', {
   /**
    * Launch a real Windows application by allowlist identifier.
    */
-  launchApp: (appId) => ipcRenderer.invoke('companion:launch-app', appId),
+  launchApp: (appId, options) => ipcRenderer.invoke('companion:launch-app', appId, options),
 
   /**
    * Physical Desktop Movement & Launch Pipeline

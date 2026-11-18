@@ -50,9 +50,9 @@ export interface CompanionAPI {
   onSyncState: (callback: (data: CompanionSyncData) => void) => () => void;
   sendSyncState: (data: CompanionSyncData) => Promise<boolean>;
   moveAvatar?: (deltaX: number, deltaY: number) => Promise<boolean>;
-  launchApp: (appId: string) => Promise<IpcLaunchResult>;
+  launchApp: (appId: string, options?: { query?: string }) => Promise<IpcLaunchResult>;
 
-  startDesktopTask: (data: { appId: string; displayName: string }) => Promise<DesktopTaskResult>;
+  startDesktopTask: (data: { appId: string; displayName: string; query?: string }) => Promise<DesktopTaskResult>;
   cancelMovement: () => Promise<boolean>;
   returnHome: () => Promise<boolean>;
   setExecutionMode: (mode: 'real' | 'mock') => Promise<'real' | 'mock'>;

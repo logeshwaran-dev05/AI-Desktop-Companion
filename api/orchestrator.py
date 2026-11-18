@@ -465,7 +465,7 @@ class TaskOrchestrator:
         tasks: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         # Initialize components
-
+        self.planner = planner or TaskPlanner()
         self.adapter = adapter or WindowsAutomationAdapter()
         # Initialize SQLite task repository
         self.repo = TaskRepository()
@@ -485,17 +485,6 @@ class TaskOrchestrator:
         task = self.tasks.get(task_id)
         if task:
             self.repo.update_task(task_id, task)
-
-
-        self.adapter = adapter or WindowsAutomationAdapter()
-        self.repo = TaskRepository()
-        # Load persisted tasks into in‑memory dict for fast access
-        self.tasks: Dict[str, Dict[str, Any]] = tasks if tasks is not None else {t["task_id"]: t for t in self.repo.list_tasks()}
-        self.permission_evaluator = PermissionEvaluator()
-        self.resolver = ApplicationResolver()
-        self.state_machine = TaskStateMachine()
-        # In-memory register mapping idempotency_key -> task_id
-        self._idempotency_registry: Dict[str, str] = {}
 
     # -----------------------------------------------------------------------
     # Application Catalogue
@@ -682,7 +671,7 @@ class TaskOrchestrator:
             if is_launch_command:
                 # Try category / alternative phrase resolution (e.g. "Can you open my browser?")
                 resolved_app = self.resolver.resolve(target_candidate) or self.resolver.resolve(clean_cmd)
-                if resolved_app:
+                if resolved_app and resolved_app.get("allowlisted", True) is not False:
                     task["intent"] = "open_application"
                     task["steps"] = [
                         {
