@@ -65,7 +65,7 @@ namespace JMVertex.Installer
             lblTitle.AutoSize = true;
 
             lblSubtitle = new Label();
-            lblSubtitle.Text = "Your Smart Desktop Assistant — Professional 1-Click Installer";
+            lblSubtitle.Text = "Your Smart Desktop Assistant — 1-Click Error-Free Installer";
             lblSubtitle.Font = new Font("Segoe UI", 10f, FontStyle.Regular);
             lblSubtitle.ForeColor = Color.FromArgb(200, 220, 210);
             lblSubtitle.Location = new Point(27, 58);
@@ -128,14 +128,14 @@ namespace JMVertex.Installer
 
             // Checkboxes
             chkDesktopShortcut = new CheckBox();
-            chkDesktopShortcut.Text = "Create Desktop Shortcut (1-Click Launch with No Console)";
+            chkDesktopShortcut.Text = "Create Desktop Shortcut (1-Click Run with No Terminal)";
             chkDesktopShortcut.Checked = true;
             chkDesktopShortcut.ForeColor = Color.FromArgb(220, 220, 220);
             chkDesktopShortcut.Location = new Point(25, 300);
             chkDesktopShortcut.AutoSize = true;
 
             chkLaunchNow = new CheckBox();
-            chkLaunchNow.Text = "Launch JM Vertex AI Companion immediately (Silent GUI Mode)";
+            chkLaunchNow.Text = "Launch JM Vertex AI Companion immediately (Silent Mode)";
             chkLaunchNow.Checked = true;
             chkLaunchNow.ForeColor = Color.FromArgb(220, 220, 220);
             chkLaunchNow.Location = new Point(25, 326);
@@ -251,7 +251,6 @@ namespace JMVertex.Installer
             installProgress = 0;
             targetDir = txtPath.Text;
 
-            // Start asynchronous installation worker
             System.Threading.ThreadPool.QueueUserWorkItem((state) => {
                 PerformFullInstallationBackground();
             });
@@ -290,23 +289,23 @@ namespace JMVertex.Installer
                     Directory.CreateDirectory(targetDir);
                 }
 
-                // STEP 1: Verify / Auto-Install Node.js runtime if missing
+                // STEP 1: Check & Auto-Install Node.js runtime if missing
                 UpdateStatus("Checking system prerequisites (Node.js runtime)...", 15);
                 EnsureNodeJsInstalled();
 
-                // STEP 2: Extract embedded payload (FastAPI + Desktop UI + Automation)
-                UpdateStatus("Extracting JM Vertex AI Companion core files...", 50);
+                // STEP 2: Extract embedded payload files
+                UpdateStatus("Extracting JM Vertex AI Companion core files...", 40);
                 ExtractPayload();
 
-                // STEP 3: Setup Dependencies & Node modules
-                UpdateStatus("Configuring companion modules on this laptop...", 75);
+                // STEP 3: Setup Dependencies & Node modules silently
+                UpdateStatus("Configuring desktop companion engine...", 65);
                 SetupDesktopDependencies();
 
-                // STEP 4: Write Silent GUI Launcher (NO CMD WINDOW)
+                // STEP 4: Configure Silent Launcher (NO CMD WINDOW, NO NPX ERROR)
                 UpdateStatus("Configuring silent desktop launcher & shortcuts...", 90);
                 ConfigureSilentLauncher();
 
-                // STEP 5: Finalize
+                // STEP 5: Complete
                 UpdateStatus("Installation Successful! Ready on your laptop.", 100);
                 this.Invoke(new Action(() => {
                     installTimer.Stop();
@@ -346,7 +345,6 @@ namespace JMVertex.Installer
         {
             bool hasNode = false;
 
-            // 1. Check if node is in PATH
             try
             {
                 Process p = new Process();
@@ -361,44 +359,51 @@ namespace JMVertex.Installer
             }
             catch { hasNode = false; }
 
-            // 2. Check standard ProgramFiles paths
+            string pfNode = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs");
+            string pfNode86 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "nodejs");
+            if (File.Exists(Path.Combine(pfNode, "node.exe")) || File.Exists(Path.Combine(pfNode86, "node.exe")))
+            {
+                hasNode = true;
+            }
+
             if (!hasNode)
             {
-                string pfNode = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs", "node.exe");
-                string pfNode86 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "nodejs", "node.exe");
-                if (File.Exists(pfNode) || File.Exists(pfNode86)) hasNode = true;
-            }
-
-            if (hasNode) return;
-
-            // Auto-Download and Silently Install Node.js
-            try
-            {
-                UpdateStatus("Downloading Node.js LTS runtime (silent auto-install)...", 25);
-                string msiUrl = "https://nodejs.org/dist/v20.18.1/node-v20.18.1-x64.msi";
-                string tempMsi = Path.Combine(Path.GetTempPath(), "node-setup-x64.msi");
-
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-                using (WebClient client = new WebClient())
+                // Download and install Node.js silently via MSI
+                try
                 {
-                    client.DownloadFile(msiUrl, tempMsi);
+                    UpdateStatus("Downloading Node.js LTS runtime (silent auto-install)...", 20);
+                    string msiUrl = "https://nodejs.org/dist/v20.18.1/node-v20.18.1-x64.msi";
+                    string tempMsi = Path.Combine(Path.GetTempPath(), "node-setup-x64.msi");
+
+                    ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                    using (WebClient client = new WebClient())
+                    {
+                        client.DownloadFile(msiUrl, tempMsi);
+                    }
+
+                    UpdateStatus("Installing Node.js runtime quietly in background...", 35);
+                    Process msiProc = new Process();
+                    msiProc.StartInfo.FileName = "msiexec.exe";
+                    msiProc.StartInfo.Arguments = string.Format("/i \"{0}\" /qn /norestart", tempMsi);
+                    msiProc.StartInfo.UseShellExecute = true;
+                    msiProc.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                    msiProc.Start();
+                    msiProc.WaitForExit(90000);
+
+                    try { File.Delete(tempMsi); } catch { }
                 }
-
-                UpdateStatus("Installing Node.js runtime quietly in background...", 40);
-                Process msiProc = new Process();
-                msiProc.StartInfo.FileName = "msiexec.exe";
-                msiProc.StartInfo.Arguments = string.Format("/i \"{0}\" /qn /norestart", tempMsi);
-                msiProc.StartInfo.UseShellExecute = true;
-                msiProc.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
-                msiProc.Start();
-                msiProc.WaitForExit(60000); // Wait up to 60s
-
-                try { File.Delete(tempMsi); } catch { }
+                catch { }
             }
-            catch (Exception ex)
+
+            // Always ensure Node.js is appended to current process PATH
+            string activeNodeDir = Directory.Exists(pfNode) ? pfNode : (Directory.Exists(pfNode86) ? pfNode86 : "");
+            if (!string.IsNullOrEmpty(activeNodeDir))
             {
-                // Non-fatal fallback
-                Debug.WriteLine("Node auto-download notice: " + ex.Message);
+                string curPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process) ?? "";
+                if (!curPath.Contains(activeNodeDir))
+                {
+                    Environment.SetEnvironmentVariable("PATH", activeNodeDir + ";" + curPath, EnvironmentVariableTarget.Process);
+                }
             }
         }
 
@@ -423,44 +428,73 @@ namespace JMVertex.Installer
         private void SetupDesktopDependencies()
         {
             string desktopDir = Path.Combine(targetDir, "desktop");
-            string nodeModules = Path.Combine(desktopDir, "node_modules");
+            string electronExe = Path.Combine(desktopDir, "node_modules", "electron", "dist", "electron.exe");
 
-            // If node_modules already exists, we are all set
-            if (Directory.Exists(nodeModules)) return;
+            // If electron.exe is already present, dependencies are fully installed
+            if (File.Exists(electronExe)) return;
 
-            // Run npm install silently in the background
+            string pfNode = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs");
+            string pfNode86 = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "nodejs");
+            string nodeDir = Directory.Exists(pfNode) ? pfNode : (Directory.Exists(pfNode86) ? pfNode86 : "");
+
+            string npmCmd = "npm.cmd";
+            if (!string.IsNullOrEmpty(nodeDir) && File.Exists(Path.Combine(nodeDir, "npm.cmd")))
+            {
+                npmCmd = Path.Combine(nodeDir, "npm.cmd");
+            }
+
+            UpdateStatus("Setting up desktop engine (installing dependencies)...", 75);
+
             try
             {
                 Process p = new Process();
-                p.StartInfo.FileName = "cmd.exe";
-                p.StartInfo.Arguments = "/c npm install --no-audit --prefer-offline";
+                p.StartInfo.FileName = npmCmd;
+                p.StartInfo.Arguments = "install --no-audit";
                 p.StartInfo.WorkingDirectory = desktopDir;
+                if (!string.IsNullOrEmpty(nodeDir))
+                {
+                    p.StartInfo.EnvironmentVariables["PATH"] = nodeDir + ";" + Environment.GetEnvironmentVariable("PATH");
+                }
                 p.StartInfo.UseShellExecute = false;
                 p.StartInfo.CreateNoWindow = true;
                 p.StartInfo.WindowStyle = ProcessWindowStyle.Hidden;
                 p.Start();
-                p.WaitForExit(90000); // 90 seconds max
+                p.WaitForExit(180000); // Wait up to 3 minutes
             }
             catch { }
         }
 
         private void ConfigureSilentLauncher()
         {
-            // 1. Write the runner script
+            // 1. Write the rock-solid runner script (NEVER USES NPX!)
             string runnerBat = Path.Combine(targetDir, "Run-Companion.bat");
             string launcherContent =
                 "@echo off\r\n" +
                 "cd /d \"%~dp0\"\r\n" +
+                "if exist \"%ProgramFiles%\\nodejs\" set \"PATH=%ProgramFiles%\\nodejs;%PATH%\"\r\n" +
+                "if exist \"%ProgramFiles(x86)%\\nodejs\" set \"PATH=%ProgramFiles(x86)%\\nodejs;%PATH%\"\r\n" +
+                "\r\n" +
                 "where python >nul 2>nul\r\n" +
                 "if %errorlevel% equ 0 (\r\n" +
                 "    start /b \"\" python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 > nul 2>&1\r\n" +
                 ")\r\n" +
+                "\r\n" +
                 "cd desktop\r\n" +
-                "if exist \"node_modules\" (\r\n" +
-                "    start /b \"\" npx electron ./electron/run-electron.cjs > nul 2>&1\r\n" +
+                ":: Direct launch of native electron.exe (ZERO npx dependency!)\r\n" +
+                "if exist \"node_modules\\electron\\dist\\electron.exe\" (\r\n" +
+                "    start \"\" \"node_modules\\electron\\dist\\electron.exe\" \".\\electron\\main.cjs\"\r\n" +
+                "    exit /b 0\r\n" +
+                ")\r\n" +
+                "\r\n" +
+                ":: First-time install fallback if node_modules missing\r\n" +
+                "if not exist \"node_modules\" (\r\n" +
+                "    call npm.cmd install --no-audit > nul 2>&1\r\n" +
+                ")\r\n" +
+                "\r\n" +
+                "if exist \"node_modules\\electron\\dist\\electron.exe\" (\r\n" +
+                "    start \"\" \"node_modules\\electron\\dist\\electron.exe\" \".\\electron\\main.cjs\"\r\n" +
                 ") else (\r\n" +
-                "    call npm install --no-audit > nul 2>&1\r\n" +
-                "    start /b \"\" npx electron ./electron/run-electron.cjs > nul 2>&1\r\n" +
+                "    call node.exe .\\electron\\run-electron.cjs > nul 2>&1\r\n" +
                 ")\r\n";
             File.WriteAllText(runnerBat, launcherContent);
 
@@ -507,7 +541,6 @@ namespace JMVertex.Installer
                 string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
                 string shortcutPath = Path.Combine(desktopPath, "JM Vertex AI Companion.lnk");
 
-                // Use Windows Script Host Shell to generate native .lnk shortcut
                 Type shellType = Type.GetTypeFromProgID("WScript.Shell");
                 if (shellType != null)
                 {
@@ -518,7 +551,6 @@ namespace JMVertex.Installer
                     shortcut.WorkingDirectory = Path.GetDirectoryName(targetScript);
                     shortcut.Description = "JM Vertex AI Desktop Companion";
 
-                    // Try to attach icon if found
                     string iconImg = Path.Combine(targetDir, @"desktop\public\companion.webp.png");
                     if (File.Exists(iconImg))
                     {
