@@ -230,6 +230,7 @@ export default function App() {
   // ── Auto-Updater & Software Versioning ──
   const [updateInfo, setUpdateInfo] = useState<import('./companion').UpdateInfo | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [isUpdateReadyToRestart, setIsUpdateReadyToRestart] = useState(false)
   const [updateStatusMsg, setUpdateStatusMsg] = useState('')
   const [appVersion, setAppVersion] = useState('1.0.1')
 
@@ -296,9 +297,9 @@ export default function App() {
       const cleanupUpdateDone = window.companionAPI.onUpdateCompleted?.((res) => {
         setIsUpdating(false)
         if (res.success) {
-          setUpdateStatusMsg('🎉 Update applied successfully! Re-launch companion to enjoy new features.')
+          setIsUpdateReadyToRestart(true)
+          setUpdateStatusMsg('🎉 Update applied successfully! Restart companion to complete.')
           voiceService.speakResponse('Companion updated successfully!')
-          setUpdateInfo(null)
         } else {
           setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
         }
@@ -921,57 +922,47 @@ export default function App() {
   }, [isChatboxOpen, isSleeping])
 
   // ── Auto-Updater Actions ───────────────────────────────────────────────────
+  const handleRelaunch = useCallback(() => {
+    if (window.companionAPI?.relaunchApp) {
+      window.companionAPI.relaunchApp()
+    } else {
+      window.location.reload()
+    }
+  }, [])
+
   const handleCheckUpdates = useCallback(async () => {
     setUpdateStatusMsg('Checking GitHub for updates…')
     if (window.companionAPI?.checkUpdates) {
       try {
         const info = await window.companionAPI.checkUpdates()
-        setUpdateInfo(info)
         if (info.updateAvailable) {
-          setUpdateStatusMsg(`Update v${info.remoteVersion} is available!`)
+          setUpdateInfo(info)
+          setIsUpdating(true)
+          setUpdateStatusMsg(`Downloading v${info.remoteVersion} silently in background…`)
+          if (window.companionAPI.applyUpdate) {
+            const res = await window.companionAPI.applyUpdate(info)
+            setIsUpdating(false)
+            if (res.success) {
+              setIsUpdateReadyToRestart(true)
+              setUpdateStatusMsg('🎉 Update applied successfully! Restart companion to complete.')
+              voiceService.speakResponse('Companion updated successfully!')
+            } else {
+              setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
+            }
+          }
         } else if (info.error) {
           setUpdateStatusMsg(info.error)
         } else {
           setUpdateStatusMsg(`You are on the latest version (v${info.currentVersion}).`)
         }
       } catch (err) {
+        setIsUpdating(false)
         setUpdateStatusMsg('Could not check updates: ' + String(err))
       }
     } else {
       setUpdateStatusMsg('Update service is active in desktop mode.')
     }
   }, [])
-
-  const handleApplyUpdate = useCallback(async () => {
-    if (!updateInfo) return
-    setIsUpdating(true)
-    setUpdateStatusMsg('Downloading update package in background…')
-    if (window.companionAPI?.applyUpdate) {
-      try {
-        const res = await window.companionAPI.applyUpdate(updateInfo)
-        setIsUpdating(false)
-        if (res.success) {
-          setUpdateStatusMsg('🎉 Update applied successfully! Re-launch companion to enjoy new features.')
-          voiceService.speakResponse('Companion updated successfully!')
-          setUpdateInfo(null)
-        } else {
-          setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
-        }
-      } catch (err) {
-        setIsUpdating(false)
-        setUpdateStatusMsg('Update error: ' + String(err))
-      }
-    }
-  }, [updateInfo])
-
-  const handleManualDownload = useCallback(() => {
-    const manualUrl = updateInfo?.manualUrl || updateInfo?.setupExeUrl || 'https://logeshwaran-dev05.github.io/AI-Desktop-Companion/'
-    if (window.companionAPI?.openExternal) {
-      window.companionAPI.openExternal(manualUrl)
-    } else {
-      window.open(manualUrl, '_blank')
-    }
-  }, [updateInfo])
 
   // ── Send typed message ──────────────────────────────────────────────────────
   function sendMessage() {
@@ -1378,7 +1369,7 @@ export default function App() {
         {/* Dynamic Content Views */}
         <div className="mc-scroll-area">
           {/* ════ SOFTWARE AUTO-UPDATE BANNER ════ */}
-          {updateInfo && updateInfo.updateAvailable && (
+          {((updateInfo && updateInfo.updateAvailable) || isUpdateReadyToRestart) && (
             <div
               className="mc-update-banner"
               style={{
@@ -1397,14 +1388,18 @@ export default function App() {
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <strong style={{ color: '#00E676', fontSize: 14 }}>
-                    🚀 New Update Available: v{updateInfo.remoteVersion}
+                    {isUpdateReadyToRestart
+                      ? '🎉 Update Ready to Apply'
+                      : `🚀 New Update Available: v${updateInfo?.remoteVersion}`}
                   </strong>
                   <span style={{ fontSize: 11, background: 'rgba(0, 230, 118, 0.2)', color: '#00E676', padding: '1px 6px', borderRadius: 4 }}>
                     Current: v{appVersion}
                   </span>
                 </div>
                 <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--mc-text-muted)' }}>
-                  {updateInfo.releaseNotes}
+                  {isUpdateReadyToRestart
+                    ? 'Update downloaded and extracted in background. Restart companion to activate.'
+                    : (updateInfo?.releaseNotes || 'Automatic background improvements.')}
                 </p>
                 {updateStatusMsg && (
                   <div style={{ fontSize: 12, color: updateStatusMsg.includes('failed') || updateStatusMsg.includes('error') ? '#EF4444' : '#00E676', marginTop: 4, fontWeight: 600 }}>
@@ -1413,43 +1408,50 @@ export default function App() {
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {isUpdateReadyToRestart ? (
+                  <button
+                    type="button"
+                    onClick={handleRelaunch}
+                    style={{
+                      background: '#00E676',
+                      color: '#000',
+                      fontWeight: 700,
+                      fontSize: 12,
+                      padding: '8px 18px',
+                      borderRadius: 6,
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 10px rgba(0, 230, 118, 0.3)',
+                    }}
+                  >
+                    ⚡ Restart Companion
+                  </button>
+                ) : isUpdating ? (
+                  <span style={{ fontSize: 12, color: '#00E676', fontWeight: 600, padding: '8px 12px' }}>
+                    ⏳ Updating silently in background…
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleCheckUpdates}
+                    style={{
+                      background: '#00E676',
+                      color: '#000',
+                      fontWeight: 700,
+                      fontSize: 12,
+                      padding: '8px 16px',
+                      borderRadius: 6,
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 10px rgba(0, 230, 118, 0.3)',
+                    }}
+                  >
+                    ⚡ Update Now
+                  </button>
+                )}
                 <button
                   type="button"
-                  disabled={isUpdating}
-                  onClick={handleApplyUpdate}
-                  style={{
-                    background: '#00E676',
-                    color: '#000',
-                    fontWeight: 700,
-                    fontSize: 12,
-                    padding: '8px 16px',
-                    borderRadius: 6,
-                    border: 'none',
-                    cursor: isUpdating ? 'wait' : 'pointer',
-                    boxShadow: '0 2px 10px rgba(0, 230, 118, 0.3)',
-                  }}
-                >
-                  {isUpdating ? '⏳ Updating…' : '⚡ Auto-Update Now'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleManualDownload}
-                  title="If automatic update cannot download, get the installer directly in browser"
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.08)',
-                    color: '#FFF',
-                    fontSize: 12,
-                    padding: '8px 14px',
-                    borderRadius: 6,
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  📥 Manual Download (.exe)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUpdateInfo(null)}
+                  onClick={() => { setUpdateInfo(null); setIsUpdateReadyToRestart(false); }}
                   style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 18, padding: '0 4px' }}
                   title="Dismiss update banner"
                 >
@@ -2076,8 +2078,8 @@ export default function App() {
 
               <div className="mc-card" style={{ gap: 12 }}>
                 <strong style={{ fontSize: 14 }}>Software Update &amp; Maintenance</strong>
-                <p style={{ fontSize: 12, color: 'var(--mc-text-muted)', margin: 0 }}>
-                  Updates are automatically downloaded and applied in the background without needing to reinstall. If automatic download is blocked by your network or firewall, you can download the setup executable directly.
+                <p style={{ fontSize: 12, color: 'var(--mc-text-muted)', margin: 0, lineHeight: 1.5 }}>
+                  Updates are automatically downloaded and applied silently in the background without needing to reinstall. No administrator elevation or separate setup files are required.
                 </p>
                 {updateStatusMsg && (
                   <div style={{ fontSize: 12, color: updateStatusMsg.includes('failed') || updateStatusMsg.includes('error') ? '#EF4444' : '#00E676', fontWeight: 600 }}>
@@ -2085,21 +2087,26 @@ export default function App() {
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-                  <button
-                    type="button"
-                    className="mc-btn-pill"
-                    onClick={handleCheckUpdates}
-                    style={{ background: '#00E676', color: '#000', fontWeight: 700 }}
-                  >
-                    🔄 Check for Updates Now
-                  </button>
-                  <button
-                    type="button"
-                    className="mc-btn-pill"
-                    onClick={handleManualDownload}
-                  >
-                    📥 Download Installer Manually (.exe)
-                  </button>
+                  {isUpdateReadyToRestart ? (
+                    <button
+                      type="button"
+                      className="mc-btn-pill"
+                      onClick={handleRelaunch}
+                      style={{ background: '#00E676', color: '#000', fontWeight: 700 }}
+                    >
+                      ⚡ Restart Companion
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mc-btn-pill"
+                      onClick={handleCheckUpdates}
+                      disabled={isUpdating}
+                      style={{ background: '#00E676', color: '#000', fontWeight: 700 }}
+                    >
+                      {isUpdating ? '⏳ Updating in Background…' : '🔄 Check for Updates Now'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

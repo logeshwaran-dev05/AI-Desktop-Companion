@@ -85,6 +85,7 @@ export interface CompanionAPI {
   applyUpdate?: (updateInfo: UpdateInfo) => Promise<UpdateApplyResult>;
   openExternal?: (url?: string) => Promise<boolean>;
   getCurrentVersion?: () => Promise<string>;
+  relaunchApp?: () => Promise<void>;
   onUpdateAvailable?: (callback: (info: UpdateInfo) => void) => () => void;
   onUpdateCompleted?: (callback: (res: UpdateApplyResult) => void) => () => void;
 

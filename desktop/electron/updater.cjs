@@ -1,11 +1,12 @@
 /**
- * JM VERTEX AI COMPANION — In-App Auto-Updater
- * ==============================================
- * Checks for updates against GitHub repository and GitHub Pages.
- * Automatically downloads and applies updates silently in user-space
- * (%LocalAppData%\Programs\JM-Vertex).
- * If auto-update fails (e.g. offline, firewalled, file locked),
- * provides direct 1-click manual download fallback.
+ * JM VERTEX AI COMPANION — 100% Silent Background Auto-Updater
+ * ==============================================================
+ * Automatically checks for updates against GitHub repository in the background.
+ * Silently downloads payload.zip and updates files in-place inside user-space
+ * (%LocalAppData%\Programs\JM-Vertex or current install directory).
+ *
+ * ZERO Windows administrator / UAC prompts (user-space execution).
+ * ZERO separate setup.exe or manual installer dialogs needed.
  */
 
 const fs = require('fs');
@@ -15,7 +16,6 @@ const { exec } = require('child_process');
 
 const PRIMARY_VERSION_URL = 'https://raw.githubusercontent.com/logeshwaran-dev05/AI-Desktop-Companion/main/landing-page/version.json';
 const FALLBACK_VERSION_URL = 'https://logeshwaran-dev05.github.io/AI-Desktop-Companion/version.json';
-const FALLBACK_MANUAL_URL = 'https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/JM-Vertex-AI-Companion-Setup.exe';
 
 /**
  * Returns current installed version from local version.json
@@ -25,12 +25,12 @@ function getCurrentVersion() {
     const vPath = path.join(__dirname, '..', 'version.json');
     if (fs.existsSync(vPath)) {
       const data = JSON.parse(fs.readFileSync(vPath, 'utf8'));
-      return data.version || '1.0.0';
+      return data.version || '1.0.1';
     }
   } catch (err) {
     console.warn('[Updater] Could not read local version.json:', err.message);
   }
-  return '1.0.0';
+  return '1.0.1';
 }
 
 /**
@@ -90,31 +90,27 @@ async function checkForUpdates() {
   try {
     remoteInfo = await fetchJson(PRIMARY_VERSION_URL);
   } catch (err1) {
-    console.warn('[Updater] Primary check failed, trying fallback...', err1.message);
     try {
       remoteInfo = await fetchJson(FALLBACK_VERSION_URL);
     } catch (err2) {
-      console.error('[Updater] All remote version checks failed:', err2.message);
+      console.warn('[Updater] Remote version checks unreachable:', err2.message);
       return {
         updateAvailable: false,
         currentVersion,
-        error: 'Unable to reach update server. Check your internet connection.',
-        manualUrl: FALLBACK_MANUAL_URL,
+        error: 'Unable to check update server.',
       };
     }
   }
 
-  const remoteVersion = remoteInfo.version || '1.0.0';
+  const remoteVersion = remoteInfo.version || '1.0.1';
   const hasUpdate = compareSemver(currentVersion, remoteVersion) > 0;
 
   return {
     updateAvailable: hasUpdate,
     currentVersion,
     remoteVersion,
-    releaseNotes: remoteInfo.releaseNotes || 'General performance and stability improvements.',
+    releaseNotes: remoteInfo.releaseNotes || 'Automatic background improvements.',
     downloadUrl: remoteInfo.downloadUrl || '',
-    setupExeUrl: remoteInfo.setupExeUrl || FALLBACK_MANUAL_URL,
-    manualUrl: remoteInfo.setupExeUrl || FALLBACK_MANUAL_URL,
   };
 }
 
@@ -133,7 +129,7 @@ function downloadFile(url, destPath) {
       if (res.statusCode !== 200) {
         file.close();
         try { fs.unlinkSync(destPath); } catch {}
-        return reject(new Error(`Failed to download update package: HTTP ${res.statusCode}`));
+        return reject(new Error(`Download failed: HTTP ${res.statusCode}`));
       }
 
       res.pipe(file);
@@ -158,16 +154,15 @@ function downloadFile(url, destPath) {
 }
 
 /**
- * Automatically download payload.zip and extract over application directory.
- * If automatic extraction fails, returns manualUrl so the user can download with 1-click.
+ * Automatically download payload.zip and extract silently over application directory.
+ * Uses path.resolve(__dirname, '..', '..') so it always targets the exact installed location,
+ * whether it's default AppData or a custom path, avoiding any permission problems.
  */
 async function downloadAndApplyUpdate(updateInfo) {
-  const manualUrl = updateInfo.setupExeUrl || FALLBACK_MANUAL_URL;
-  if (!updateInfo.downloadUrl) {
+  if (!updateInfo || !updateInfo.downloadUrl) {
     return {
       success: false,
       error: 'Download URL missing from update metadata.',
-      manualUrl,
     };
   }
 
@@ -175,15 +170,15 @@ async function downloadAndApplyUpdate(updateInfo) {
   const appRoot = path.resolve(__dirname, '..', '..');
 
   try {
-    console.log(`[Updater] Downloading update payload from: ${updateInfo.downloadUrl}`);
+    console.log(`[Updater] Downloading silent update from: ${updateInfo.downloadUrl}`);
     await downloadFile(updateInfo.downloadUrl, tempZip);
 
     if (!fs.existsSync(tempZip) || fs.statSync(tempZip).size < 1000) {
       throw new Error('Downloaded update file is invalid or empty.');
     }
 
-    console.log(`[Updater] Extracting payload to: ${appRoot}`);
-    // Extract using PowerShell Expand-Archive
+    console.log(`[Updater] Silently extracting update to: ${appRoot}`);
+    // Extract using PowerShell Expand-Archive (silent user-space overwrite)
     await new Promise((resolve, reject) => {
       const psCmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${tempZip}' -DestinationPath '${appRoot}' -Force"`;
       exec(psCmd, { windowsHide: true }, (err, stdout, stderr) => {
@@ -195,7 +190,7 @@ async function downloadAndApplyUpdate(updateInfo) {
       });
     });
 
-    // Write updated version.json
+    // Update local version stamp
     try {
       const vPath = path.join(__dirname, '..', 'version.json');
       fs.writeFileSync(vPath, JSON.stringify({
@@ -213,19 +208,34 @@ async function downloadAndApplyUpdate(updateInfo) {
       newVersion: updateInfo.remoteVersion,
     };
   } catch (err) {
-    console.error('[Updater] Auto-update extraction failed:', err);
+    console.error('[Updater] Background auto-update failed:', err);
     try { fs.unlinkSync(tempZip); } catch {}
     return {
       success: false,
       error: err.message,
-      manualUrl,
     };
   }
+}
+
+/**
+ * Full-cycle silent background auto-update.
+ */
+async function runSilentAutoUpdate() {
+  const check = await checkForUpdates();
+  if (!check.updateAvailable) {
+    return { updated: false, currentVersion: check.currentVersion };
+  }
+  const result = await downloadAndApplyUpdate(check);
+  return {
+    updated: result.success,
+    newVersion: check.remoteVersion,
+    error: result.error,
+  };
 }
 
 module.exports = {
   getCurrentVersion,
   checkForUpdates,
   downloadAndApplyUpdate,
-  FALLBACK_MANUAL_URL,
+  runSilentAutoUpdate,
 };

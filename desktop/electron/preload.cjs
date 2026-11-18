@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('companionAPI', {
   applyUpdate: (updateInfo) => ipcRenderer.invoke('companion:apply-update', updateInfo),
   openExternal: (url) => ipcRenderer.invoke('companion:open-external', url),
   getCurrentVersion: () => ipcRenderer.invoke('companion:get-current-version'),
+  relaunchApp: () => ipcRenderer.invoke('companion:relaunch-app'),
   onUpdateAvailable: (callback) => {
     const sub = (_e, data) => callback(data);
     ipcRenderer.on('companion:update-available', sub);

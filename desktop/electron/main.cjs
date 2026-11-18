@@ -371,6 +371,12 @@ ipcMain.handle('companion:get-current-version', () => {
   return getCurrentVersion();
 });
 
+ipcMain.handle('companion:relaunch-app', () => {
+  console.log('[Electron] Relaunching application to apply updates...');
+  app.relaunch();
+  app.exit(0);
+});
+
 // -- Physical Desktop Movement & Launch Pipeline ---------------------------------
 ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayName, query }) => {
   console.log(`[Electron] Starting desktop task for "${appId}" (${displayName}) query="${query || ''}" in ${executionMode} mode`);
@@ -608,21 +614,25 @@ app.whenReady().then(() => {
   createTray();
   console.log('[Electron] Started with Mission Control Dashboard and floating Doraemon companion.');
 
-  // Silent background update check 4 seconds after launch
+  // 100% Silent Background Auto-Update 4 seconds after launch
   setTimeout(async () => {
     try {
       const updateResult = await checkForUpdates();
       if (updateResult && updateResult.updateAvailable) {
-        console.log('[Updater] Background check: New update available!', updateResult.remoteVersion);
-        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-          dashboardWindow.webContents.send('companion:update-available', updateResult);
-        }
-        if (avatarWindow && !avatarWindow.isDestroyed()) {
-          avatarWindow.webContents.send('companion:update-available', updateResult);
+        console.log('[Updater] Background auto-update downloading v' + updateResult.remoteVersion);
+        const applyRes = await downloadAndApplyUpdate(updateResult);
+        if (applyRes && applyRes.success) {
+          console.log('[Updater] Background auto-update applied successfully!');
+          if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+            dashboardWindow.webContents.send('companion:update-completed', applyRes);
+          }
+          if (avatarWindow && !avatarWindow.isDestroyed()) {
+            avatarWindow.webContents.send('companion:update-completed', applyRes);
+          }
         }
       }
     } catch (err) {
-      console.warn('[Updater] Silent startup check failed:', err.message);
+      console.warn('[Updater] Silent startup auto-update check error:', err.message);
     }
   }, 4000);
 
