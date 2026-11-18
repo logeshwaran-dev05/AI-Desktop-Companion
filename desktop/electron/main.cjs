@@ -47,7 +47,8 @@ function getDevServerUrl() {
 
 function loadWindow(win, viewName) {
   const distIndexPath = path.join(__dirname, '../dist/index.html');
-  const shouldUseProd = app.isPackaged || process.argv.includes('--prod') || (!process.env.VITE_DEV_SERVER_URL && !fs.existsSync(path.join(__dirname, '../dev-server-url.txt')) && fs.existsSync(distIndexPath));
+  const isExplicitDev = Boolean(process.env.VITE_DEV_SERVER_URL) || process.argv.includes('--dev');
+  const shouldUseProd = !isExplicitDev && fs.existsSync(distIndexPath);
 
   if (shouldUseProd) {
     const fileUrl = pathToFileURL(distIndexPath);

@@ -330,23 +330,34 @@ namespace JMVertex.Installer
                         "title JM Vertex - AI Desktop Companion\r\n" +
                         "echo ======================================================================\r\n" +
                         "echo   JM VERTEX TECHNOLOGIES - AI DESKTOP COMPANION\r\n" +
-                        "echo   Launching Desktop Avatar & Windows Automation Engine...\r\n" +
+                        "echo   Launching Desktop Companion...\r\n" +
                         "echo ======================================================================\r\n" +
                         "cd /d \"%~dp0\"\r\n" +
                         "\r\n" +
+                        "where npm >nul 2>nul\r\n" +
+                        "if %errorlevel% neq 0 (\r\n" +
+                        "    echo [NOTE] Node.js runtime not found on this laptop.\r\n" +
+                        "    echo Please install Node.js from https://nodejs.org/ or run:\r\n" +
+                        "    echo winget install OpenJS.NodeJS.LTS\r\n" +
+                        "    echo.\r\n" +
+                        "    pause\r\n" +
+                        "    exit /b 1\r\n" +
+                        ")\r\n" +
+                        "\r\n" +
                         "echo [*] Starting Python Automation API Backend on port 8000...\r\n" +
-                        "start /b \"\" python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 > nul 2>&1\r\n" +
+                        "where python >nul 2>nul\r\n" +
+                        "if %errorlevel% equ 0 (\r\n" +
+                        "    start /b \"\" python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 > nul 2>&1\r\n" +
+                        ")\r\n" +
                         "timeout /t 2 /nobreak > nul\r\n" +
                         "\r\n" +
                         "echo [*] Launching Desktop Companion Interface...\r\n" +
-                        "if exist \"desktop\\node_modules\" (\r\n" +
-                        "    cd desktop\r\n" +
-                        "    call npx electron ./electron/run-electron.cjs\r\n" +
-                        ") else (\r\n" +
-                        "    cd desktop\r\n" +
-                        "    call npm install\r\n" +
-                        "    call npm run app\r\n" +
+                        "cd desktop\r\n" +
+                        "if not exist \"node_modules\" (\r\n" +
+                        "    echo [*] Installing dependencies on this laptop (first time only)...\r\n" +
+                        "    call npm install --no-audit\r\n" +
                         ")\r\n" +
+                        "call npx electron ./electron/run-electron.cjs\r\n" +
                         "\r\n" +
                         "echo [*] Shutting down backend on exit...\r\n" +
                         "for /f \"tokens=5\" %%a in ('netstat -aon ^| findstr \":8000\" ^| findstr \"LISTENING\"') do (\r\n" +

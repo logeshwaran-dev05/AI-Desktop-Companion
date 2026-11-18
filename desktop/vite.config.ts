@@ -67,6 +67,7 @@ function electronDevServerPlugin(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [react(), electronDevServerPlugin()],
   server: {
     host: '127.0.0.1',
