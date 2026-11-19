@@ -426,6 +426,23 @@ class WindowsApplicationCatalogue:
                 for a in app.aliases:
                     self._alias_index[a.lower()] = app.app_id
 
+        from ai_engine.catalogue import get_installed_apps
+        for app_meta in get_installed_apps():
+            app_id = app_meta["app_id"]
+            if app_id not in self._catalogue:
+                self._register_app(
+                    CatalogueApp(
+                        app_id=app_id,
+                        app_name=app_meta["app_name"],
+                        executable=app_meta.get("executable", f"{app_id}.exe"),
+                        launch_target=app_meta.get("executable", app_meta.get("web_url", "")),
+                        launch_type="web" if app_meta.get("type") == "web" else "executable",
+                        allowlisted=(app_id == "notepad"),
+                        aliases=app_meta.get("aliases", []),
+                        description=f"{app_meta.get('category', 'Application')}: {app_meta.get('app_name')}",
+                    )
+                )
+
     def _discover_registry_app_paths(self) -> None:
         """Safely query Windows App Paths from Registry without modifying system state."""
         if winreg is None:

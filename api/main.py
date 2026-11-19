@@ -100,6 +100,7 @@ def create_plan(request: PlanRequest):
                 "action": step.action,
                 "target": step.target,
                 "expected_outcome": step.expected_outcome,
+                "parameters": getattr(step, "parameters", {}),
             }
             for step in result.steps
         ],

@@ -77,6 +77,7 @@ class PlanStepModel(BaseModel):
     target: str
     depends_on: List[int] = Field(default_factory=list)
     expected_outcome: str = ""
+    parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PlanResponseModel(BaseModel):

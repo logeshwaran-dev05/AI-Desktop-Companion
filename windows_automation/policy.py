@@ -17,7 +17,7 @@ from windows_automation.catalogue import ApplicationCatalogue
 class WindowsActionPolicy:
     """Validates incoming action requests against security policies and application allowlists."""
 
-    SUPPORTED_ACTIONS: Set[str] = {"open_application"}
+    SUPPORTED_ACTIONS: Set[str] = {"open_application", "search_web_app"}
 
     # Forbidden shell execution tokens / dangerous argument patterns
     FORBIDDEN_SUBSTRINGS = {
@@ -163,6 +163,10 @@ class WindowsActionPolicy:
                     f"Parameter contains prohibited shell command characters or tokens: '{arg}'",
                 )
 
+        # Web search actions do not require local executable files
+        if request.action_name == "search_web_app":
+            return True, None, None
+
         # Target verification against resolved record or Catalogue
         if request.resolved_record:
             record = request.resolved_record
@@ -213,6 +217,16 @@ class WindowsActionPolicy:
         # Fallback for explicit built-in Notepad
         if lower_target in ["notepad", "notepad.exe", r"c:\windows\system32\notepad.exe"]:
             return True, None, None
+
+        # Check against AI Engine catalogue for web and hybrid apps
+        try:
+            from ai_engine.catalogue import get_installed_apps
+            for app_meta in get_installed_apps():
+                candidates = [app_meta["app_name"].lower(), app_meta["app_id"].lower(), *[a.lower() for a in app_meta.get("aliases", [])]]
+                if lower_target in candidates:
+                    return True, None, None
+        except Exception:
+            pass
 
         if self.catalogue:
             return (
