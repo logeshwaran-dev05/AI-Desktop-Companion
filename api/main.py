@@ -108,11 +108,22 @@ def create_plan(request: PlanRequest):
 # ---------------------------------------------------------------------------
 
 @app.get("/catalogue", response_model=List[AppCatalogueItem])
-def list_catalogue():
+def list_catalogue(search: Optional[str] = None, category: Optional[str] = None):
+    """Return all installed applications from the catalogue.
+    Optional query parameters:
+    - `search`: case‑insensitive match against application name or any alias.
+    - `category`: filter by the application's `category` field (if populated).
     """
-    Return all installed applications from the catalogue with their allowlist status.
-    """
-    return orchestrator.get_catalogue()
+    apps = orchestrator.get_catalogue()
+    # Apply search filter
+    if search:
+        term = search.lower()
+        apps = [a for a in apps if term in (a.get("app_name") or "").lower() or any(term in alias.lower() for alias in a.get("aliases", []))]
+    # Apply category filter
+    if category:
+        cat = category.lower()
+        apps = [a for a in apps if (a.get("category") or "").lower() == cat]
+    return apps
 
 
 @app.get("/catalogue/{app_id}", response_model=AppCatalogueItem)
