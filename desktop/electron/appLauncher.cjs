@@ -289,8 +289,9 @@ const APP_REGISTRY = [
   {
     id: 'canva',
     displayName: 'Canva',
-    aliases: ['canva', 'design'],
+    aliases: ['canva', 'design', 'graphics'],
     webUrl: 'https://www.canva.com',
+    searchUrl: 'https://www.canva.com/search?q=',
     processNames: BROWSER_PROCESSES,
     type: 'web',
   },
@@ -519,15 +520,6 @@ const APP_REGISTRY = [
     processNames: ['Figma.exe'],
     fallbackUrl: 'https://www.figma.com',
     type: 'hybrid',
-  },
-  {
-    id: 'canva',
-    displayName: 'Canva',
-    aliases: ['canva', 'design', 'graphics'],
-    webUrl: 'https://www.canva.com',
-    searchUrl: 'https://www.canva.com/search?q=',
-    processNames: BROWSER_PROCESSES,
-    type: 'web',
   },
   {
     id: 'jira',

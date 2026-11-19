@@ -224,6 +224,32 @@ class TestIntentFallbacksIntegration(unittest.TestCase):
         self.assertTrue(result.verification.verified)
         self.assertIn("netflix.com", result.verification.details.get("url", ""))
 
+    def test_catalogue_and_launcher_app_ids_unique(self):
+        """Verify all application IDs are strictly unique in catalogue and launcher."""
+        import re
+        import os
+        from collections import Counter
+
+        # 1. Catalogue uniqueness
+        apps = get_installed_apps()
+        cat_ids = [app["app_id"] for app in apps]
+        cat_counts = Counter(cat_ids)
+        cat_dups = {k: v for k, v in cat_counts.items() if v > 1}
+        self.assertEqual(cat_dups, {}, f"Duplicate app_ids found in catalogue: {cat_dups}")
+
+        # 2. Electron appLauncher.cjs uniqueness
+        cjs_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "desktop", "electron", "appLauncher.cjs"
+        )
+        if os.path.exists(cjs_path):
+            with open(cjs_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            cjs_ids = re.findall(r"id:\s*['\"]([^'\"]+)['\"]", content)
+            cjs_counts = Counter(cjs_ids)
+            cjs_dups = {k: v for k, v in cjs_counts.items() if v > 1}
+            self.assertEqual(cjs_dups, {}, f"Duplicate IDs found in appLauncher.cjs: {cjs_dups}")
+
 
 if __name__ == "__main__":
     unittest.main()
+
