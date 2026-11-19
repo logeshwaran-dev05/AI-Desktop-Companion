@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass, field
 from typing import Optional, Literal
 
@@ -13,6 +12,21 @@ PlanStatus = Literal[
     "plan_ready",
     "clarification_required",
     "unsupported"
+]
+
+# Supported command actions and intents
+CommandAction = Literal[
+    "open_application",
+    "search_web_app",
+    "move_window",
+    "maximize_window",
+]
+
+CommandIntent = Literal[
+    "open_application",
+    "search_web_app",
+    "general_question",
+    "unknown",
 ]
 
 
@@ -41,6 +55,7 @@ class PlanStep:
     target: str
     depends_on: list[int] = field(default_factory=list)
     expected_outcome: str = ""
+    parameters: dict = field(default_factory=dict)
 
 
 @dataclass

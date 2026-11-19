@@ -81,6 +81,7 @@ class WindowsAutomationAdapter:
         action_name = getattr(step, "action", None) or (step.get("action") if isinstance(step, dict) else "")
         target = getattr(step, "target", None) or (step.get("target") if isinstance(step, dict) else "")
         step_id = getattr(step, "step_id", 1) or (step.get("step_id", 1) if isinstance(step, dict) else 1)
+        parameters = getattr(step, "parameters", {}) or (step.get("parameters", {}) if isinstance(step, dict) else {})
 
         auth_obj = None
         if isinstance(authorization, AuthorizationDecision):
@@ -108,6 +109,7 @@ class WindowsAutomationAdapter:
             step_id=step_id,
             action_name=action_name,
             target=target,
+            parameters=parameters,
             timeout_seconds=timeout_seconds,
             authorization=auth_obj,
             resolved_record=resolved_record,

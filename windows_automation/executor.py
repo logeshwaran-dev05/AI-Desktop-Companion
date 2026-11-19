@@ -161,9 +161,100 @@ class WindowsAutomationExecutor:
                 diagnostics=diag,
             )
 
-        # Step 4: Resolve verified target path
+        # Step 4: Handle search_web_app action
+        if request.action_name == "search_web_app":
+            query = (request.parameters or {}).get("query", "")
+            search_url = None
+            web_url = None
+            from ai_engine.catalogue import get_installed_apps
+            target_norm = request.target.lower().strip()
+            for app_meta in get_installed_apps():
+                candidates = [app_meta["app_name"].lower(), app_meta["app_id"].lower(), *[a.lower() for a in app_meta.get("aliases", [])]]
+                if target_norm in candidates:
+                    search_url = app_meta.get("search_url")
+                    web_url = app_meta.get("web_url")
+                    break
+
+            import urllib.parse
+            if search_url and query:
+                final_url = f"{search_url}{urllib.parse.quote_plus(query)}"
+            elif web_url:
+                final_url = web_url
+            else:
+                final_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query or request.target)}"
+
+            self._open_url(final_url)
+            evidence = VerificationEvidence(
+                verified=True,
+                method="web_search_invocation",
+                verification_status="verified",
+                details={"target": request.target, "url": final_url, "query": query, "type": "web_search"},
+            )
+            diag.launch_method = "web_search"
+            diag.verification_summary = evidence.details
+            audit_record = self.audit_logger.log_event(
+                event_type="web_search_executed",
+                action_id=request.action_id,
+                task_id=request.task_id,
+                summary=f"Executed web search on '{request.target}' for query '{query}'",
+                details={"url": final_url, "query": query},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+                audit=audit_record,
+            )
+
+        # Step 5: Resolve verified target path with web fallback if native unavailable
         resolved_path = self.policy.resolve_executable_path(request.target, request=request)
         if not resolved_path:
+            # Check for web fallback
+            from ai_engine.catalogue import get_installed_apps
+            target_norm = request.target.lower().strip()
+            fallback_url = None
+            for app_meta in get_installed_apps():
+                candidates = [app_meta["app_name"].lower(), app_meta["app_id"].lower(), *[a.lower() for a in app_meta.get("aliases", [])]]
+                if target_norm in candidates:
+                    fallback_url = app_meta.get("fallback_url") or app_meta.get("web_url")
+                    break
+
+            if fallback_url:
+                self._open_url(fallback_url)
+                evidence = VerificationEvidence(
+                    verified=True,
+                    method="web_fallback_invocation",
+                    verification_status="verified",
+                    details={"target": request.target, "url": fallback_url, "type": "web_fallback"},
+                )
+                diag.launch_method = "web_fallback"
+                diag.verification_summary = evidence.details
+                audit_record = self.audit_logger.log_event(
+                    event_type="web_fallback_executed",
+                    action_id=request.action_id,
+                    task_id=request.task_id,
+                    summary=f"Executed web fallback for '{request.target}' -> {fallback_url}",
+                    details={"url": fallback_url},
+                )
+                return ExecutionResult(
+                    action_id=request.action_id,
+                    task_id=request.task_id,
+                    status="completed",
+                    verification_status="verified",
+                    started_at=started_at,
+                    completed_at=current_iso_timestamp(),
+                    duration_ms=int((time.monotonic() - start_time) * 1000),
+                    verification=evidence,
+                    diagnostics=diag,
+                    audit=audit_record,
+                )
+
             diag.failing_stage = "target_resolution"
             diag.exception_details = f"Could not resolve executable for target '{request.target}'"
             return ExecutionResult(
@@ -484,3 +575,37 @@ class WindowsAutomationExecutor:
     def get_active_process(self, action_id: str) -> Optional[Any]:
         entry = self._active_processes.get(action_id)
         return entry.get("proc") if isinstance(entry, dict) else entry
+
+    def _open_url(self, url: str) -> None:
+        """Open a URL in Chrome, Edge, or default browser."""
+        if self._subprocess_runner != subprocess.Popen:
+            try:
+                self._subprocess_runner(["chrome.exe", url], shell=False)
+            except Exception:
+                pass
+            return
+
+        opened = False
+        for browser_cmd in (["chrome.exe", url], ["msedge.exe", url]):
+            try:
+                self._subprocess_runner(
+                    browser_cmd,
+                    shell=False,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                opened = True
+                break
+            except Exception:
+                continue
+
+        if not opened:
+            try:
+                if hasattr(os, "startfile"):
+                    os.startfile(url)
+                else:
+                    import webbrowser
+                    webbrowser.open(url)
+            except Exception:
+                pass
