@@ -161,9 +161,11 @@ class WindowsAutomationExecutor:
                 diagnostics=diag,
             )
 
-        # Step 4: Handle search_web_app action
+        # Step 4: Handle web, navigation, and GUI primitive actions
         if request.action_name == "search_web_app":
             query = (request.parameters or {}).get("query", "")
+            profile_dir = (request.parameters or {}).get("profile_dir")
+            profile_name = (request.parameters or {}).get("profile_name")
             search_url = None
             web_url = None
             from ai_engine.catalogue import get_installed_apps
@@ -183,7 +185,7 @@ class WindowsAutomationExecutor:
             else:
                 final_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query or request.target)}"
 
-            self._open_url(final_url)
+            self._open_url(final_url, profile_dir=profile_dir, profile_name=profile_name)
             evidence = VerificationEvidence(
                 verified=True,
                 method="web_search_invocation",
@@ -210,6 +212,149 @@ class WindowsAutomationExecutor:
                 verification=evidence,
                 diagnostics=diag,
                 audit=audit_record,
+            )
+
+        if request.action_name == "navigate_url":
+            url = (request.parameters or {}).get("url") or request.target
+            profile_dir = (request.parameters or {}).get("profile_dir")
+            profile_name = (request.parameters or {}).get("profile_name")
+            self._open_url(url, profile_dir=profile_dir, profile_name=profile_name)
+            evidence = VerificationEvidence(
+                verified=True,
+                method="url_navigation",
+                verification_status="verified",
+                details={"url": url, "profile_dir": profile_dir},
+            )
+            diag.launch_method = "url_navigation"
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "type_text":
+            from windows_automation.gui_primitives import type_text, focus_window_by_title
+            target_win = request.target
+            if target_win and target_win not in {"active_window", ""}:
+                focus_window_by_title(target_win)
+            text_to_type = (request.parameters or {}).get("text", "")
+            press_enter = (request.parameters or {}).get("press_enter", True)
+            type_text(text_to_type, press_enter=press_enter)
+            evidence = VerificationEvidence(
+                verified=True,
+                method="keyboard_sendinput",
+                verification_status="verified",
+                details={"typed_length": len(text_to_type), "enter_pressed": press_enter},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "clipboard_copy":
+            from windows_automation.gui_primitives import press_hotkey, get_clipboard_text
+            press_hotkey("ctrl", "c")
+            time.sleep(0.1)
+            copied = get_clipboard_text()
+            evidence = VerificationEvidence(
+                verified=True,
+                method="clipboard_copy",
+                verification_status="verified",
+                details={"copied_text": copied, "length": len(copied)},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "clipboard_paste":
+            from windows_automation.gui_primitives import press_hotkey, set_clipboard_text, focus_window_by_title
+            text = (request.parameters or {}).get("text")
+            if text:
+                set_clipboard_text(text)
+            target_win = request.target
+            if target_win and target_win not in {"active_window", ""}:
+                focus_window_by_title(target_win)
+            press_hotkey("ctrl", "v")
+            evidence = VerificationEvidence(
+                verified=True,
+                method="clipboard_paste",
+                verification_status="verified",
+                details={"target": target_win},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "press_hotkey":
+            from windows_automation.gui_primitives import press_hotkey
+            keys = (request.parameters or {}).get("keys", ["enter"])
+            press_hotkey(*keys)
+            evidence = VerificationEvidence(
+                verified=True,
+                method="hotkey_sendinput",
+                verification_status="verified",
+                details={"keys": keys},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "wait":
+            sec = float((request.parameters or {}).get("seconds", 1.0))
+            time.sleep(min(sec, 10.0))
+            evidence = VerificationEvidence(
+                verified=True,
+                method="timer_wait",
+                verification_status="verified",
+                details={"waited_seconds": sec},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
             )
 
         # Step 5: Resolve verified target path with web fallback if native unavailable
@@ -359,6 +504,15 @@ class WindowsAutomationExecutor:
             else:
                 # Standard subprocess launch (shell=False strictly)
                 launch_args = [resolved_path]
+                if "chrome" in str(resolved_path).lower():
+                    from windows_automation.browser_profiles import resolve_profile_directory
+                    p_dir = (request.parameters or {}).get("profile_dir")
+                    p_name = (request.parameters or {}).get("profile_name")
+                    if not p_dir and p_name:
+                        p_dir = resolve_profile_directory("chrome", p_name)
+                    if p_dir:
+                        launch_args.append(f"--profile-directory={p_dir}")
+
                 extra_args = request.parameters.get("args", []) if request.parameters else []
                 launch_args.extend([str(a) for a in extra_args])
 
@@ -576,17 +730,25 @@ class WindowsAutomationExecutor:
         entry = self._active_processes.get(action_id)
         return entry.get("proc") if isinstance(entry, dict) else entry
 
-    def _open_url(self, url: str) -> None:
-        """Open a URL in Chrome, Edge, or default browser."""
+    def _open_url(self, url: str, profile_dir: Optional[str] = None, profile_name: Optional[str] = None) -> None:
+        """Open a URL in Chrome, Edge, or default browser with profile directory support."""
+        from windows_automation.browser_profiles import resolve_profile_directory, build_chrome_launch_args
+
+        resolved_dir = profile_dir
+        if not resolved_dir and profile_name:
+            resolved_dir = resolve_profile_directory("chrome", profile_name)
+
+        chrome_args = build_chrome_launch_args(profile_dir=resolved_dir, url=url)
+
         if self._subprocess_runner != subprocess.Popen:
             try:
-                self._subprocess_runner(["chrome.exe", url], shell=False)
+                self._subprocess_runner(["chrome.exe", *chrome_args], shell=False)
             except Exception:
                 pass
             return
 
         opened = False
-        for browser_cmd in (["chrome.exe", url], ["msedge.exe", url]):
+        for browser_cmd in (["chrome.exe", *chrome_args], ["msedge.exe", url]):
             try:
                 self._subprocess_runner(
                     browser_cmd,

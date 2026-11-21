@@ -17,7 +17,17 @@ from windows_automation.catalogue import ApplicationCatalogue
 class WindowsActionPolicy:
     """Validates incoming action requests against security policies and application allowlists."""
 
-    SUPPORTED_ACTIONS: Set[str] = {"open_application", "search_web_app"}
+    SUPPORTED_ACTIONS: Set[str] = {
+        "open_application",
+        "search_web_app",
+        "navigate_url",
+        "type_text",
+        "clipboard_copy",
+        "clipboard_paste",
+        "press_hotkey",
+        "click_element",
+        "wait",
+    }
 
     # Forbidden shell execution tokens / dangerous argument patterns
     FORBIDDEN_SUBSTRINGS = {
@@ -117,7 +127,10 @@ class WindowsActionPolicy:
             )
 
         if not request.target or not request.target.strip():
-            return False, "ERR_INVALID_REQUEST", "Target cannot be empty."
+            if request.action_name in {"clipboard_copy", "wait", "type_text", "press_hotkey", "clipboard_paste"}:
+                request.target = "active_window"
+            else:
+                return False, "ERR_INVALID_REQUEST", "Target cannot be empty."
 
         clean_target = request.target.strip()
         lower_target = clean_target.lower()
@@ -163,8 +176,17 @@ class WindowsActionPolicy:
                     f"Parameter contains prohibited shell command characters or tokens: '{arg}'",
                 )
 
-        # Web search actions do not require local executable files
-        if request.action_name == "search_web_app":
+        # GUI, clipboard, and web actions do not require local executable files in catalogue
+        if request.action_name in {
+            "search_web_app",
+            "navigate_url",
+            "type_text",
+            "clipboard_copy",
+            "clipboard_paste",
+            "press_hotkey",
+            "click_element",
+            "wait",
+        }:
             return True, None, None
 
         # Target verification against resolved record or Catalogue
