@@ -226,9 +226,97 @@ class WindowsWindowVerifier:
 
         while (time.monotonic() - start_time) < timeout_seconds:
 
-            # Check if process terminated prematurely
+            # Check for visible window first
+            try:
 
+                window_details = finder(pid, process_name)
+
+            except TypeError:
+
+                # Support single-argument finder mock
+
+                window_details = finder(pid)
+
+
+
+            if window_details is not None:
+
+                return VerificationEvidence(
+
+                    verified=True,
+
+                    verification_status="launch_verified",
+
+                    method="win32_window_enumeration",
+
+                    details={
+
+                        "process_id": pid,
+
+                        "window_pid": window_details.get("window_pid", pid),
+
+                        "process_name": process_name,
+
+                        "process_alive": True,
+
+                        "window_found": True,
+
+                        "window_handle": window_details.get("hwnd"),
+
+                        "window_title": window_details.get("window_title", ""),
+
+                        "window_class": window_details.get("window_class", ""),
+
+                        "dimensions": {
+
+                            "width": window_details.get("width", 0),
+
+                            "height": window_details.get("height", 0),
+
+                        },
+
+                        "matched_via": window_details.get("matched_via", "native_win32"),
+
+                    },
+
+                    evidence_timestamp=current_iso_timestamp(),
+
+                )
+
+
+
+            # Check if process terminated prematurely
             if is_process_alive_check and not is_process_alive_check(pid):
+
+                # Allow a brief grace period for Windows launcher stubs
+                time.sleep(0.3)
+                try:
+                    window_details = finder(pid, process_name)
+                except TypeError:
+                    window_details = finder(pid)
+
+                if window_details is not None:
+                    return VerificationEvidence(
+                        verified=True,
+                        verification_status="launch_verified",
+                        method="win32_window_enumeration",
+                        details={
+                            "process_id": pid,
+                            "window_pid": window_details.get("window_pid", pid),
+                            "process_name": process_name,
+                            "process_alive": True,
+                            "window_found": True,
+                            "window_handle": window_details.get("hwnd"),
+                            "window_title": window_details.get("window_title", ""),
+                            "window_class": window_details.get("window_class", ""),
+                            "dimensions": {
+                                "width": window_details.get("width", 0),
+                                "height": window_details.get("height", 0),
+                            },
+                            "matched_via": window_details.get("matched_via", "native_win32"),
+                        },
+                        evidence_timestamp=current_iso_timestamp(),
+                    )
 
                 return VerificationEvidence(
 
@@ -255,24 +343,6 @@ class WindowsWindowVerifier:
                     evidence_timestamp=current_iso_timestamp(),
 
                 )
-
-
-
-            # Check for visible window
-
-            try:
-
-                window_details = finder(pid, process_name)
-
-            except TypeError:
-
-                # Support single-argument finder mock
-
-                window_details = finder(pid)
-
-
-
-            if window_details is not None:
 
                 return VerificationEvidence(
 

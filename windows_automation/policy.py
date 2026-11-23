@@ -26,6 +26,7 @@ class WindowsActionPolicy:
         "clipboard_paste",
         "press_hotkey",
         "click_element",
+        "click_youtube_result",
         "wait",
     }
 
@@ -127,7 +128,7 @@ class WindowsActionPolicy:
             )
 
         if not request.target or not request.target.strip():
-            if request.action_name in {"clipboard_copy", "wait", "type_text", "press_hotkey", "clipboard_paste"}:
+            if request.action_name in {"clipboard_copy", "wait", "type_text", "press_hotkey", "clipboard_paste", "click_youtube_result"}:
                 request.target = "active_window"
             else:
                 return False, "ERR_INVALID_REQUEST", "Target cannot be empty."
@@ -185,6 +186,7 @@ class WindowsActionPolicy:
             "clipboard_paste",
             "press_hotkey",
             "click_element",
+            "click_youtube_result",
             "wait",
         }:
             return True, None, None
@@ -323,5 +325,15 @@ class WindowsActionPolicy:
         if clean_lower in ["notepad", "notepad.exe", r"c:\windows\system32\notepad.exe"]:
             candidate = r"C:\Windows\System32\notepad.exe"
             return candidate if os.path.exists(candidate) else "notepad.exe"
+
+        if clean_lower in ["chrome", "chrome.exe", "google chrome"]:
+            for cand in [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            ]:
+                if os.path.exists(cand):
+                    return cand
+            return "chrome.exe"
 
         return None

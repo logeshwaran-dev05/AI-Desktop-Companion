@@ -31,12 +31,14 @@ class TestWindowsAutomationLive(unittest.TestCase):
 
     def tearDown(self):
         # Clean up any processes spawned during live testing
+        import time
         for pid in self.spawned_pids:
             try:
                 import os, signal
                 os.kill(pid, signal.SIGTERM)
             except Exception:
                 pass
+        time.sleep(0.15)
 
     def test_live_notepad_launch_and_verification(self):
         """Test real Notepad launch and Win32 window verification on Windows."""
