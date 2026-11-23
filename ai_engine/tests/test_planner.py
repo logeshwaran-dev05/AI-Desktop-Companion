@@ -10,6 +10,8 @@ class TestTaskPlanner(unittest.TestCase):
     def setUp(self):
         self.planner = TaskPlanner()
 
+    # Basic application tests
+
     def test_open_notepad(self):
         response = self.planner.process_command(
             CommandRequest(text="Open Notepad")
@@ -197,7 +199,7 @@ class TestTaskPlanner(unittest.TestCase):
         )
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.entities.application, "Notepad")
-    
+
     # Natural language command tests
 
     def test_i_want_to_use_notepad(self):
@@ -235,7 +237,8 @@ class TestTaskPlanner(unittest.TestCase):
         )
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.entities.application, "Google Chrome")
-        # Additional command variation tests
+
+    # Additional command variation tests
 
     def test_run_notepad(self):
         response = self.planner.process_command(
@@ -261,6 +264,98 @@ class TestTaskPlanner(unittest.TestCase):
             "Google Chrome"
         )
 
+    # Multi-step planning tests
+
+    def test_youtube_search_and_play_second_video(self):
+        response = self.planner.process_command(
+            CommandRequest(
+                text="Open YouTube, search for lofi hip hop, and play the second video"
+            )
+        )
+
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "multi_step")
+        self.assertEqual(len(response.steps), 3)
+
+        self.assertEqual(response.steps[0].action, "open_website")
+        self.assertEqual(response.steps[1].action, "search")
+        self.assertEqual(response.steps[1].target, "lofi hip hop")
+        self.assertEqual(response.steps[2].action, "play_video")
+        self.assertEqual(response.steps[2].target, "1")
+
+        self.assertEqual(response.steps[1].depends_on, [1])
+        self.assertEqual(response.steps[2].depends_on, [2])
+
+    def test_chatgpt_open_and_ask_prompt(self):
+        response = self.planner.process_command(
+            CommandRequest(
+                text="Open ChatGPT and ask explain artificial intelligence"
+            )
+        )
+
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "multi_step")
+        self.assertEqual(len(response.steps), 2)
+
+        self.assertEqual(response.steps[0].action, "open_website")
+        self.assertEqual(response.steps[1].action, "ask_prompt")
+        self.assertEqual(
+            response.steps[1].target,
+            "explain artificial intelligence"
+        )
+
+    def test_youtube_profile_and_search(self):
+        response = self.planner.process_command(
+            CommandRequest(
+                text="Open YouTube using my Boovi Chrome profile, search for music, and play the second video"
+            )
+        )
+
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.entities.application, "youtube")
+
+        self.assertEqual(
+            response.entities.parameters["profile_name"],
+            "Boovi"
+        )
+        self.assertEqual(
+            response.entities.parameters["profile_directory"],
+            "Default"
+        )
+        self.assertEqual(
+            response.entities.parameters["search_query"],
+            "music"
+        )
+        self.assertEqual(
+            response.entities.parameters["video_index"],
+            1
+        )
+
+    def test_youtube_steps_are_ordered(self):
+        response = self.planner.process_command(
+            CommandRequest(
+                text="Open YouTube, search for music, and play the first video"
+            )
+        )
+
+        self.assertEqual(
+            [step.step_id for step in response.steps],
+            [1, 2, 3]
+        )
+        self.assertEqual(
+            [step.depends_on for step in response.steps],
+            [[], [1], [2]]
+        )
+
+    def test_youtube_play_without_video_number(self):
+        response = self.planner.process_command(
+            CommandRequest(
+                text="Open YouTube and play a video"
+            )
+        )
+
+        self.assertTrue(response.requires_clarification)
+        self.assertEqual(response.status, "clarification_required")
     # ── Backend Intent Fallbacks & Search Tests ──
 
     def test_open_chrome_intent(self):
