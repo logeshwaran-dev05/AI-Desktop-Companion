@@ -32,6 +32,7 @@ from api.orchestrator_instance import orchestrator
 planner = TaskPlanner()
 from api.schemas import (
     AppCatalogueItem,
+    BrowserProfile,
     CommandRunRequest,
     PlanRequest,
     PlanResponseModel,
@@ -50,11 +51,13 @@ from api.schemas import (
     VoiceTranscriptResponse,
 )
 
+
 app = FastAPI(
     title="AI Desktop Companion API",
     description="Backend orchestration service for AI Desktop Companion",
     version="1.1.0",
 )
+
 
 # Global in-memory storage for active tasks
 tasks: Dict[str, Dict[str, Any]] = {}
@@ -67,8 +70,21 @@ app.include_router(catalogue_router)
 
 
 # ---------------------------------------------------------------------------
-# Health Check Endpoint
+# Browser Profiles Endpoint
 # ---------------------------------------------------------------------------
+
+@app.get("/api/browser/profiles", response_model=List[BrowserProfile])
+def get_browser_profiles_endpoint():
+    """Return discovered Chrome browser profiles.
+    """
+    try:
+        from windows_automation.browser_profiles import get_browser_profiles
+        profiles = get_browser_profiles("chrome")
+        return profiles
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 
 @app.get("/health")
 def health_check():
@@ -223,6 +239,18 @@ def submit_voice_transcript(request: VoiceTranscriptRequest):
 
 
 # ---------------------------------------------------------------------------
+# Browser Profiles Endpoint
+@app.get("/api/browser/profiles", response_model=List[BrowserProfile])
+def get_browser_profiles_endpoint():
+    """Return discovered Chrome browser profiles.
+    """
+    try:
+        from windows_automation.browser_profiles import get_browser_profiles
+        profiles = get_browser_profiles("chrome")
+        return profiles
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
 # Unified Task Submission Endpoint
 # ---------------------------------------------------------------------------
 

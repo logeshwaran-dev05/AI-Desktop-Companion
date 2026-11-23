@@ -351,7 +351,7 @@ class ApplicationResolver:
                 if app["app_id"] == aliased_id:
                     return app
 
-        # 3. Windows Application Catalogue (dynamic — covers Settings pages, built-ins, third-party)
+        # 3. Windows Application Catalogue (dynamic — covers Settings pages, built-ins, third‑party)
         catalogue_entry = _windows_catalogue.resolve_phrase(target)
         if catalogue_entry:
             return {
@@ -454,7 +454,7 @@ class PermissionEvaluator:
                 reason=f"Application '{matched_app}' is installed in catalogue but requires explicit user approval before launching.",
             )
 
-        # 3. Not in allowlist and not in catalogue -> Denied
+        # 3. Not in allowlist and not in catalogue → Denied
         return AuthorizationDecision(
             decision_id=decision_id,
             permission_status="denied",
@@ -492,7 +492,7 @@ class TaskOrchestrator:
         self.permission_evaluator = PermissionEvaluator()
         self.resolver = ApplicationResolver()
         self.state_machine = TaskStateMachine()
-        # In‑memory register mapping idempotency_key -> task_id
+        # In‑memory register mapping idempotency_key → task_id
         self._idempotency_registry: Dict[str, str] = {}
 
     def _persist_task(self, task_id: str) -> None:
@@ -576,18 +576,17 @@ class TaskOrchestrator:
     ) -> Dict[str, Any]:
         """
         Common execution pipeline for all user requests (voice and text).
-        
+
         Flow:
-        User Input -> Voice/Text Processing -> AI Intent -> Application Matching ->
-        Windows Automation -> Verification -> Task Status (launched / failed)
+        User Input → Voice/Text Processing → AI Intent → Application Matching →
+        Windows Automation → Verification → Task Status (launched / failed)
         """
         # Step 1: Idempotency Gate
-        if idempotency_key:
-            if idempotency_key in self._idempotency_registry:
-                existing_id = self._idempotency_registry[idempotency_key]
-                raise DuplicateRequestError(
-                    f"Duplicate request detected for idempotency key '{idempotency_key}'. Task ID: '{existing_id}'."
-                )
+        if idempotency_key and idempotency_key in self._idempotency_registry:
+            existing_id = self._idempotency_registry[idempotency_key]
+            raise DuplicateRequestError(
+                f"Duplicate request detected for idempotency key '{idempotency_key}'. Task ID: '{existing_id}'."
+            )
 
         # Step 2: Task Record Initialization
         task_id = task_id or f"task_{uuid4()}"
@@ -656,7 +655,7 @@ class TaskOrchestrator:
         plan_response = self.planner.process_command(CommandRequest(text=command, input_type=input_type))
         task["intent"] = plan_response.intent
 
-        # Step 4.1: Check for Ambiguous Command or Clarification Required
+        # Step 4.1: Ambiguity / Clarification
         clean_cmd = (command or "").strip().lower()
         is_launch_command = any(
             clean_cmd.startswith(prefix)
@@ -681,22 +680,19 @@ class TaskOrchestrator:
             task["completed_at"] = current_iso_timestamp()
             return task
 
-        # Step 4.2: Handle Unsupported or Missing Steps with Alternative Phrase / Category Recovery
+        # Step 4.2: Unsupported / Missing Steps – try fallback resolution
         if plan_response.status == "unsupported" or not plan_response.steps:
             if is_launch_command:
-                # Try category / alternative phrase resolution (e.g. "Can you open my browser?")
                 resolved_app = self.resolver.resolve(target_candidate) or self.resolver.resolve(clean_cmd)
                 if resolved_app and resolved_app.get("allowlisted", True) is not False:
                     task["intent"] = "open_application"
-                    task["steps"] = [
-                        {
-                            "step_id": 1,
-                            "action": "open_application",
-                            "target": resolved_app["app_name"],
-                            "depends_on": [],
-                            "expected_outcome": f"{resolved_app['app_name']} should open successfully.",
-                        }
-                    ]
+                    task["steps"] = [{
+                        "step_id": 1,
+                        "action": "open_application",
+                        "target": resolved_app["app_name"],
+                        "depends_on": [],
+                        "expected_outcome": f"{resolved_app['app_name']} should open successfully.",
+                    }]
                 else:
                     self.state_machine.transition(task, "failed", f"Unknown application: '{target_candidate}' is not recognized.")
                     task["error_code"] = "ERR_UNKNOWN_APPLICATION"
@@ -801,12 +797,14 @@ class TaskOrchestrator:
             task, "launching", f"Dispatching '{action_name}' on '{canonical_target}' to Windows Automation."
         )
 
+        # Build the PlanStep with merged parameters (no extra params at this point)
         plan_step = PlanStep(
             step_id=step_data.get("step_id", 1),
             action=action_name,
             target=canonical_target,
             depends_on=step_data.get("depends_on", []),
             expected_outcome=step_data.get("expected_outcome", ""),
+            parameters={},
             parameters=step_params,
         )
 
@@ -825,6 +823,7 @@ class TaskOrchestrator:
             task["completed_at"] = current_iso_timestamp()
             return task
 
+        # Record execution result
         task["active_action_id"] = exec_result.action_id
         task["duration_ms"] = exec_result.duration_ms
         task["completed_at"] = exec_result.completed_at
@@ -964,8 +963,7 @@ class TaskOrchestrator:
 
     def execute_task(self, task_id: str, timeout_seconds: float = 10.0) -> Dict[str, Any]:
         """Execute pending plan steps through policy evaluation, dispatch, and verification.
-        The task state is persisted to SQLite after each mutation.
-        """
+        The task state is persisted to SQLite after each mutation."""
         task = self.tasks.get(task_id)
         if not task:
             raise KeyError(f"Task '{task_id}' not found.")
@@ -976,6 +974,8 @@ class TaskOrchestrator:
             return task
 
         steps = task.get("steps", [])
+        context: Dict[str, Any] = {}
+
         if not steps:
             if current_status == "pending":
                 task["message"] = "No executable plan steps found for this task."
@@ -986,6 +986,11 @@ class TaskOrchestrator:
             action_name = step_data.get("action", "")
             target = step_data.get("target", "")
             step_id = step_data.get("step_id", 1)
+
+            # Merge any explicit parameters with context from previous step
+            step_params = step_data.get("parameters", {}) or {}
+            merged_params = {**context, **step_params} if context else step_params
+            step_data["parameters"] = merged_params
 
             auth_dict = task.get("authorization")
             if auth_dict and auth_dict.get("permission_status") == "granted":
@@ -1007,6 +1012,7 @@ class TaskOrchestrator:
                 self._persist_task(task_id)
                 return task
 
+            # Mark running state
             self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
             task["started_at"] = task["started_at"] or current_iso_timestamp()
 
@@ -1016,15 +1022,25 @@ class TaskOrchestrator:
                 target=target,
                 depends_on=step_data.get("depends_on", []),
                 expected_outcome=step_data.get("expected_outcome", ""),
+                parameters=merged_params,
                 parameters=step_data.get("parameters", {}),
             )
 
-            exec_result: ExecutionResult = self.adapter.execute_plan_step(
-                step=plan_step,
-                task_id=task_id,
-                authorization=auth,
-                timeout_seconds=timeout_seconds,
-            )
+            try:
+                exec_result: ExecutionResult = self.adapter.execute_plan_step(
+                    step=plan_step,
+                    task_id=task_id,
+                    authorization=auth,
+                    timeout_seconds=timeout_seconds,
+                )
+            except Exception as exc:
+                self.state_machine.transition(task, "failed", f"Windows Automation execution failure: {str(exc)}")
+                task["active_action_id"] = None
+                task["error_code"] = "ERR_AUTOMATION_FAILURE"
+                task["error_message"] = str(exc)
+                task["completed_at"] = current_iso_timestamp()
+                self._persist_task(task_id)
+                return task
 
             task["active_action_id"] = exec_result.action_id
 
@@ -1038,6 +1054,11 @@ class TaskOrchestrator:
                 task["completed_at"] = exec_result.completed_at
                 task["message"] = f"Action '{action_name}' completed and verified successfully."
                 self._persist_task(task_id)
+                # Update context for next step from verification details if present
+                if exec_result.verification and isinstance(exec_result.verification.details, dict):
+                    context = exec_result.verification.details
+                else:
+                    context = {}
                 continue
 
             elif exec_result.status == "cancelled":

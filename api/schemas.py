@@ -173,6 +173,28 @@ class TaskResultResponse(BaseModel):
     structured_request: Optional[Dict[str, Any]] = None
     completed_at: Optional[str] = None
 
+# New schema for browser profiles
+class BrowserProfile(BaseModel):
+    """Simple model representing a browser user profile."""
+    name: str = Field(..., description="Profile name, e.g., 'Default' or 'Profile 1'")
+    path: str = Field(..., description="Filesystem path to the profile directory")
+
+    """Task execution result response with verification evidence."""
+    task_id: str
+    status: str
+    result: Optional[Any] = None
+    message: Optional[str] = ""
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    verification: Optional[Dict[str, Any]] = None
+    audit: Optional[Dict[str, Any]] = None
+    duration_ms: Optional[int] = None
+    intent: Optional[str] = None
+    selected_application: Optional[str] = None
+    application_id: Optional[str] = None
+    structured_request: Optional[Dict[str, Any]] = None
+    completed_at: Optional[str] = None
+
 
 
 class TaskExecuteRequest(BaseModel):
