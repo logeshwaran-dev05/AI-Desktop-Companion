@@ -1,7 +1,12 @@
-const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
+const { launchApp } = require('./appLauncher.cjs');
+const { resolveAppTarget } = require('./shortcutDiscovery.cjs');
+const { moveAvatarTo, returnHome, cancelActiveMovement } = require('./desktopMovement.cjs');
+const { checkForUpdates, downloadAndApplyUpdate, getCurrentVersion, FALLBACK_MANUAL_URL } = require('./updater.cjs');
+
 
 let dashboardWindow = null;
 let avatarWindow = null;
@@ -20,8 +25,7 @@ if (!gotTheLock) {
       dashboardWindow.show();
       dashboardWindow.focus();
     }
-    if (avatarWindow && !avatarWindow.isDestroyed()) {
-      avatarWindow.show();
+    if (avatarWindow && !avatarWindow.isDestroyed() && avatarWindow.isVisible()) {
     }
   });
 }
@@ -44,7 +48,8 @@ function getDevServerUrl() {
 
 function loadWindow(win, viewName) {
   const distIndexPath = path.join(__dirname, '../dist/index.html');
-  const shouldUseProd = app.isPackaged || process.argv.includes('--prod') || (!process.env.VITE_DEV_SERVER_URL && !fs.existsSync(path.join(__dirname, '../dev-server-url.txt')) && fs.existsSync(distIndexPath));
+  const isExplicitDev = Boolean(process.env.VITE_DEV_SERVER_URL) || process.argv.includes('--dev');
+  const shouldUseProd = !isExplicitDev && fs.existsSync(distIndexPath);
 
   if (shouldUseProd) {
     const fileUrl = pathToFileURL(distIndexPath);
@@ -125,8 +130,8 @@ function createAvatarWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
 
-  const width = 230;
-  const height = 280;
+  const width = 240;
+  const height = 300;
   // Position in bottom-right corner of work area with safe padding
   const x = Math.max(0, Math.round(workArea.x + workArea.width - width - 24));
   const y = Math.max(0, Math.round(workArea.y + workArea.height - height - 24));
@@ -142,7 +147,8 @@ function createAvatarWindow() {
     hasShadow: false,
     resizable: false,
     alwaysOnTop: true,
-    skipTaskbar: false,
+    skipTaskbar: true,
+    focusable: true,
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -160,9 +166,18 @@ function createAvatarWindow() {
 
   loadWindow(avatarWindow, 'avatar');
 
-  avatarWindow.once('ready-to-show', () => {
+    avatarWindow.once('ready-to-show', () => {
     console.log('[Electron] Floating companion avatar window ready and shown at', { x, y, width, height });
     avatarWindow.show();
+    try {
+      avatarWindow.setAlwaysOnTop(true, 'screen-saver');
+    } catch {
+      avatarWindow.setAlwaysOnTop(true);
+    }
+  });
+
+  avatarWindow.webContents.on('console-message', (_e, level, message) => {
+    console.log('[AvatarWindow:Console]', message);
   });
 
   avatarWindow.on('closed', () => {
@@ -241,8 +256,8 @@ function createTray() {
         }
       } else {
         if (!avatarWindow || avatarWindow.isDestroyed()) {
-          createAvatarWindow();
-        } else {
+                createAvatarWindow();
+              } else {
           avatarWindow.show();
           avatarWindow.setAlwaysOnTop(true, 'screen-saver');
         }
@@ -255,6 +270,228 @@ function createTray() {
 }
 
 // IPC Handlers
+// -- App Launcher IPC Handler --------------------------------------------------
+// Accepts only an app identifier string against an explicit allowlist.
+// Never executes arbitrary shell commands from the renderer.
+ipcMain.handle('companion:launch-app', async (_event, appId, options) => {
+  console.log('[Electron] companion:launch-app requested for:', appId, options);
+  try {
+    const result = await launchApp(appId, options);
+    console.log('[Electron] companion:launch-app result:', result);
+    return result;
+  } catch (err) {
+    console.error('[Electron] companion:launch-app unexpected error:', err);
+    return {
+      success: false,
+      verified: false,
+      displayName: appId,
+      mode: 'real',
+      error: 'Unexpected launcher error: ' + err.message,
+    };
+  }
+});
+let executionMode = 'real'; // 'real' | 'mock'
+
+ipcMain.handle('companion:set-execution-mode', (_event, mode) => {
+  executionMode = mode === 'mock' ? 'mock' : 'real';
+  console.log('[Electron] Execution mode set to:', executionMode);
+  return executionMode;
+});
+
+ipcMain.handle('companion:get-execution-mode', () => {
+  return executionMode;
+});
+
+ipcMain.handle('companion:cancel-movement', () => {
+  console.log('[Electron] Movement cancelled by user request');
+  cancelActiveMovement();
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.webContents.send('companion:sync-state', {
+      avatarState: 'Error',
+      taskState: 'cancelled',
+      isMoving: false,
+    });
+  }
+  return true;
+});
+
+ipcMain.handle('companion:return-home', async () => {
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    return await returnHome(avatarWindow);
+  }
+  return false;
+});
+
+// -- Auto-Updater IPC Handlers -------------------------------------------------
+ipcMain.handle('companion:check-updates', async () => {
+  console.log('[Electron] Checking for updates...');
+  try {
+    return await checkForUpdates();
+  } catch (err) {
+    return {
+      updateAvailable: false,
+      currentVersion: getCurrentVersion(),
+      error: err.message,
+      manualUrl: FALLBACK_MANUAL_URL,
+    };
+  }
+});
+
+ipcMain.handle('companion:apply-update', async (_event, updateInfo) => {
+  console.log('[Electron] Applying update:', updateInfo);
+  try {
+    const result = await downloadAndApplyUpdate(updateInfo);
+    if (result.success) {
+      // Broadcast update completion
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        dashboardWindow.webContents.send('companion:update-completed', result);
+      }
+      if (avatarWindow && !avatarWindow.isDestroyed()) {
+        avatarWindow.webContents.send('companion:update-completed', result);
+      }
+    }
+    return result;
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message,
+      manualUrl: FALLBACK_MANUAL_URL,
+    };
+  }
+});
+
+ipcMain.handle('companion:open-external', async (_event, url) => {
+  const target = url || FALLBACK_MANUAL_URL;
+  console.log('[Electron] Opening external URL in browser:', target);
+  shell.openExternal(target);
+  return true;
+});
+
+ipcMain.handle('companion:get-current-version', () => {
+  return getCurrentVersion();
+});
+
+ipcMain.handle('companion:relaunch-app', () => {
+  console.log('[Electron] Relaunching application to apply updates...');
+  app.relaunch();
+  app.exit(0);
+});
+
+// -- Physical Desktop Movement & Launch Pipeline ---------------------------------
+ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayName, query }) => {
+  console.log(`[Electron] Starting desktop task for "${appId}" (${displayName}) query="${query || ''}" in ${executionMode} mode`);
+
+  // Step 1: Discovered Desktop Shortcut or Calculated Destination
+  const targetInfo = resolveAppTarget(appId);
+  console.log('[Electron] Discovered target info:', targetInfo);
+
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('companion:task-progress', {
+      phase: 'planning',
+      appId,
+      displayName,
+      targetInfo,
+      executionMode,
+    });
+  }
+
+  // Step 2: Physical Movement across Windows Desktop
+  let moveResult = { completed: true, cancelled: false };
+
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    // If chatbox is open, collapse back to compact avatar window (240x300) before travelling
+    const [currW, currH] = avatarWindow.getSize();
+    if (currW > 240 || currH > 300) {
+      const [currX, currY] = avatarWindow.getPosition();
+      avatarWindow.setBounds({
+        x: currX,
+        y: Math.round(currY + (currH - 300)),
+        width: 240,
+        height: 300,
+      });
+      avatarWindow.webContents.send('companion:sync-state', {
+        chatboxOpen: false,
+      });
+    }
+
+    avatarWindow.show();
+    avatarWindow.webContents.send('companion:sync-state', {
+      avatarState: 'Working',
+      taskState: 'launching',
+      isMoving: true,
+      chatboxOpen: false,
+    });
+
+    moveResult = await moveAvatarTo(
+      avatarWindow,
+      targetInfo.destination.x,
+      targetInfo.destination.y,
+      {
+        onStep: (stepData) => {
+          if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+            dashboardWindow.webContents.send('companion:movement-progress', stepData);
+          }
+        },
+      }
+    );
+  }
+
+  if (moveResult.cancelled) {
+    return {
+      success: false,
+      cancelled: true,
+      taskState: 'cancelled',
+      displayName: displayName || appId,
+      executionMode,
+      error: 'Movement cancelled by user',
+    };
+  }
+
+  // Step 3: Launch Application
+  let launchResult;
+  if (executionMode === 'mock') {
+    await new Promise((r) => setTimeout(r, 800));
+    launchResult = {
+      success: true,
+      verified: false,
+      displayName: displayName || appId,
+      mode: 'mock',
+      mockSimulated: true,
+      message: `[MOCK MODE] Simulated launch of ${displayName || appId}. No real Windows process was started.`,
+    };
+  } else {
+    launchResult = await launchApp(appId, { query });
+  }
+
+  // Step 4: Verification and Celebration
+  const finalState = launchResult.success ? 'success' : 'failed';
+
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.webContents.send('companion:sync-state', {
+      avatarState: launchResult.success ? 'Success' : 'Error',
+      taskState: finalState,
+      isMoving: false,
+    });
+  }
+
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.webContents.send('companion:task-progress', {
+      phase: finalState,
+      appId,
+      displayName,
+      launchResult,
+      executionMode,
+    });
+  }
+
+  return {
+    ...launchResult,
+    taskState: finalState,
+    targetInfo,
+    executionMode,
+  };
+});
+
 ipcMain.handle('companion:open-dashboard', () => {
   if (!dashboardWindow || dashboardWindow.isDestroyed()) {
     createDashboardWindow();
@@ -294,6 +531,42 @@ ipcMain.handle('companion:wake-avatar', () => {
   return true;
 });
 
+ipcMain.handle('companion:set-chatbox-open', (_event, isOpen) => {
+  if (!avatarWindow || avatarWindow.isDestroyed()) return false;
+  const [currX, currY] = avatarWindow.getPosition();
+  const [_currW, currH] = avatarWindow.getSize();
+  const primaryDisplay = screen.getDisplayNearestPoint({ x: currX, y: currY });
+  const workArea = primaryDisplay.workArea;
+
+  if (isOpen) {
+    const targetW = 660;
+    const targetH = 540;
+    // Doraemon is positioned on the LEFT side of the expanded window.
+    // Anchor Doraemon's X coordinate stably at currX (the chatbox opens to his right).
+    let targetX = currX;
+    if (targetX + targetW > workArea.x + workArea.width) {
+      targetX = workArea.x + workArea.width - targetW;
+    }
+    targetX = Math.max(workArea.x, targetX);
+
+    // Anchor vertically to bottom so Doraemon remains grounded on the desktop
+    let targetY = currY - (targetH - currH);
+    targetY = Math.max(workArea.y, Math.min(targetY, workArea.y + workArea.height - targetH));
+    avatarWindow.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH });
+  } else {
+    const targetW = 240;
+    const targetH = 300;
+    // Doraemon was on the LEFT side of the expanded window, so his X was currX.
+    let targetX = currX;
+    targetX = Math.max(workArea.x, Math.min(targetX, workArea.x + workArea.width - targetW));
+
+    let targetY = currY + (currH - targetH);
+    targetY = Math.max(workArea.y, Math.min(targetY, workArea.y + workArea.height - targetH));
+    avatarWindow.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH });
+  }
+  return true;
+});
+
 ipcMain.handle('companion:move-avatar', (_event, { deltaX, deltaY }) => {
   if (avatarWindow && !avatarWindow.isDestroyed()) {
     const [currX, currY] = avatarWindow.getPosition();
@@ -305,6 +578,22 @@ ipcMain.handle('companion:move-avatar', (_event, { deltaX, deltaY }) => {
 ipcMain.handle('companion:quit-app', () => {
   app.isQuitting = true;
   app.quit();
+});
+
+ipcMain.handle('companion:trigger-voice-typing', async () => {
+  const { exec } = require('child_process');
+  const psFile = path.join(__dirname, 'triggerVoiceTyping.ps1');
+  return new Promise((resolve) => {
+    exec(`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${psFile}"`, (err, stdout) => {
+      if (err) {
+        console.warn('[Electron] Trigger voice typing error:', err);
+        resolve(false);
+      } else {
+        console.log('[Electron] Triggered Windows Voice Typing (Win+H):', (stdout || '').trim());
+        resolve(true);
+      }
+    });
+  });
 });
 
 ipcMain.handle('companion:sync-state', (_event, data) => {
@@ -319,16 +608,33 @@ ipcMain.handle('companion:sync-state', (_event, data) => {
 });
 
 app.whenReady().then(() => {
-  console.log('[Electron] Application ready. Initializing Dashboard, Floating Avatar, and System Tray...');
+  console.log('[Electron] Application ready. Initializing Dashboard, Avatar, and System Tray...');
   createDashboardWindow();
   createAvatarWindow();
   createTray();
-  console.log('[Electron] Windows and tray created successfully.');
+  console.log('[Electron] Started with Mission Control Dashboard and floating Doraemon companion.');
+
+  // Automatic update check 4 seconds after launch
+  setTimeout(async () => {
+    try {
+      const updateResult = await checkForUpdates();
+      if (updateResult && updateResult.updateAvailable) {
+        console.log('[Updater] Update available notice: v' + updateResult.remoteVersion);
+        if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+          dashboardWindow.webContents.send('companion:update-available', updateResult);
+        }
+        if (avatarWindow && !avatarWindow.isDestroyed()) {
+          avatarWindow.webContents.send('companion:update-available', updateResult);
+        }
+      }
+    } catch (err) {
+      console.warn('[Updater] Silent startup update check notice:', err.message);
+    }
+  }, 4000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createDashboardWindow();
-      createAvatarWindow();
     }
   });
 });

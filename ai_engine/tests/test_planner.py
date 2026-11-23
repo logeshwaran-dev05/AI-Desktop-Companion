@@ -356,6 +356,111 @@ class TestTaskPlanner(unittest.TestCase):
 
         self.assertTrue(response.requires_clarification)
         self.assertEqual(response.status, "clarification_required")
+    # ── Backend Intent Fallbacks & Search Tests ──
+
+    def test_open_chrome_intent(self):
+        response = self.planner.process_command(
+            CommandRequest(text="open chrome")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "open_application")
+        self.assertEqual(response.steps[0].action, "open_application")
+        self.assertEqual(response.steps[0].target, "chrome")
+
+    def test_open_spotify_intent(self):
+        response = self.planner.process_command(
+            CommandRequest(text="open spotify")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "open_application")
+        self.assertEqual(response.steps[0].action, "open_application")
+        self.assertEqual(response.steps[0].target, "spotify")
+        self.assertEqual(response.entities.application, "Spotify")
+
+    def test_play_believer_on_youtube(self):
+        response = self.planner.process_command(
+            CommandRequest(text="play believer on youtube")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "search_web_app")
+        self.assertEqual(response.steps[0].action, "search_web_app")
+        self.assertEqual(response.steps[0].target, "youtube")
+        self.assertEqual(response.steps[0].parameters, {"query": "believer"})
+        self.assertEqual(response.entities.parameters, {"query": "believer"})
+        self.assertEqual(response.entities.application, "YouTube")
+
+    def test_search_python_tutorials_on_google(self):
+        response = self.planner.process_command(
+            CommandRequest(text="search python tutorials on google")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "search_web_app")
+        self.assertEqual(response.steps[0].action, "search_web_app")
+        self.assertEqual(response.steps[0].target, "google")
+        self.assertEqual(response.steps[0].parameters, {"query": "python tutorials"})
+        self.assertEqual(response.entities.parameters, {"query": "python tutorials"})
+        self.assertEqual(response.entities.application, "Google")
+
+    def test_multi_word_search_query_youtube(self):
+        response = self.planner.process_command(
+            CommandRequest(text="play bohemian rhapsody remastered on youtube")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "search_web_app")
+        self.assertEqual(response.steps[0].target, "youtube")
+        self.assertEqual(response.steps[0].parameters, {"query": "bohemian rhapsody remastered"})
+
+    def test_multi_word_search_query_google(self):
+        response = self.planner.process_command(
+            CommandRequest(text="search python tutorials for beginners on google")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "search_web_app")
+        self.assertEqual(response.steps[0].target, "google")
+        self.assertEqual(response.steps[0].parameters, {"query": "python tutorials for beginners"})
+
+    def test_case_insensitive_commands(self):
+        for cmd in [
+            "OPEN CHROME",
+            "PLAY BELIEVER ON YOUTUBE",
+            "SEARCH PYTHON TUTORIALS ON GOOGLE",
+            "Open Spotify",
+        ]:
+            response = self.planner.process_command(CommandRequest(text=cmd))
+            self.assertEqual(response.status, "plan_ready")
+            self.assertIn(response.intent, ("open_application", "search_web_app"))
+
+    def test_extra_spaces_handling(self):
+        response_yt = self.planner.process_command(
+            CommandRequest(text="   play    believer    on    youtube   ")
+        )
+        self.assertEqual(response_yt.status, "plan_ready")
+        self.assertEqual(response_yt.steps[0].target, "youtube")
+        self.assertEqual(response_yt.steps[0].parameters, {"query": "believer"})
+
+        response_sp = self.planner.process_command(
+            CommandRequest(text="   open    spotify   ")
+        )
+        self.assertEqual(response_sp.status, "plan_ready")
+        self.assertEqual(response_sp.steps[0].target, "spotify")
+
+    def test_missing_search_query(self):
+        for incomplete_cmd in [
+            "search on google",
+            "play on youtube",
+            "search",
+            "play",
+        ]:
+            response = self.planner.process_command(CommandRequest(text=incomplete_cmd))
+            self.assertEqual(response.status, "clarification_required")
+            self.assertTrue(response.requires_clarification)
+            self.assertIsNotNone(response.clarification_question)
+
+    def test_unknown_search_application(self):
+        response = self.planner.process_command(
+            CommandRequest(text="play believer on non_existent_app_xyz")
+        )
+        self.assertEqual(response.status, "unsupported")
 
 
 if __name__ == "__main__":

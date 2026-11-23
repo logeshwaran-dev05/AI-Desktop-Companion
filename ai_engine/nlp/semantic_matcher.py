@@ -1,11 +1,21 @@
 
-from sentence_transformers import SentenceTransformer
-from sentence_transformers.util import cos_sim
+try:
+    from sentence_transformers import SentenceTransformer
+    from sentence_transformers.util import cos_sim
+    HAS_SENTENCE_TRANSFORMERS = True
+except ImportError:
+    SentenceTransformer = None
+    cos_sim = None
+    HAS_SENTENCE_TRANSFORMERS = False
 
 
 class SemanticMatcher:
 
     def __init__(self):
+        if not HAS_SENTENCE_TRANSFORMERS or SentenceTransformer is None:
+            self.model = None
+            self.intent_embeddings = {}
+            return
 
         self.model = SentenceTransformer(
             "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
@@ -65,6 +75,16 @@ class SemanticMatcher:
                 "status": "empty_input",
                 "message": "Please enter a command."
             }
+
+        if not self.model or not self.intent_embeddings:
+            lower = user_input.lower().strip()
+            if any(k in lower for k in ["open", "launch", "start", "run"]):
+                return {"intent": "open_application", "confidence": 0.9, "status": "recognized", "message": "Matched application command."}
+            if any(k in lower for k in ["move", "drag", "shift"]):
+                return {"intent": "move_window", "confidence": 0.9, "status": "recognized", "message": "Matched window command."}
+            if any(k in lower for k in ["maximize", "full screen", "bigger"]):
+                return {"intent": "maximize_window", "confidence": 0.9, "status": "recognized", "message": "Matched window command."}
+            return {"intent": None, "confidence": 0.0, "status": "unsupported", "message": "Unsupported command."}
 
         input_embedding = self.model.encode(
             user_input,
