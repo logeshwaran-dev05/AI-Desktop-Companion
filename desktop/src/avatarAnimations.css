@@ -1,0 +1,235 @@
+/*
+ * Avatar Character Animations — Doraemon Native Companion
+ * ========================================================
+ * Authentic animations preserving Doraemon's original character design,
+ * proportions, face, eyes, nose, mouth, bell, collar, and colors.
+ *
+ * Implements:
+ * 1. Natural idle animation with subtle breathing.
+ * 2. Realistic walking with alternating stride, arm swing rhythm, and gentle body bounce.
+ * 3. Running animation with faster tempo, forward lean, and speed streaks.
+ * 4. Direction-aware turning (facing left/right) across the Windows desktop.
+ * 5. Natural greeting and waving animation.
+ * 6. Expressive thinking, success, and error animations.
+ * 7. Synchronization with Electron window movement.
+ */
+
+/* ── Direction-Aware Turning ─────────────────────────────────────────────── */
+.doraemon-facing-left {
+  transform: scaleX(-1);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.doraemon-facing-right {
+  transform: scaleX(1);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Subtle Idle Breathing & Hover ───────────────────────────────────────── */
+@keyframes doraemon-breathe {
+  0%, 100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.012, 1.018);
+  }
+}
+
+/* ── Realistic Walking Ground Contact (Subtle vertical step, zero rotational wobble) ───── */
+@keyframes doraemon-walking-step {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* ── Running Keyframes (Faster Tempo, Lean & Stride) ─────────────────────── */
+@keyframes doraemon-running-sprint {
+  0% {
+    transform: translateY(0) rotate(7deg);
+  }
+  25% {
+    transform: translateY(-9px) rotate(9deg);
+  }
+  50% {
+    transform: translateY(0) rotate(7deg);
+  }
+  75% {
+    transform: translateY(-9px) rotate(5deg);
+  }
+  100% {
+    transform: translateY(0) rotate(7deg);
+  }
+}
+
+/* ── Greeting & Waving Keyframes ─────────────────────────────────────────── */
+@keyframes doraemon-greeting-bounce {
+  0%, 100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(3deg);
+  }
+}
+
+/* ── Thinking Keyframes ─────────────────────────────────────────────────── */
+@keyframes doraemon-think-tilt {
+  0%, 100% {
+    transform: translateY(0) rotate(-5deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(-2deg);
+  }
+}
+
+/* ── Success Celebration Keyframes ───────────────────────────────────────── */
+@keyframes doraemon-success-jump {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-26px) scale(1.06);
+  }
+  65% {
+    transform: translateY(-18px) scale(1.03);
+  }
+}
+
+/* ── Error & Slump Keyframes ─────────────────────────────────────────────── */
+@keyframes doraemon-error-wobble {
+  0%, 100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  20%, 60% {
+    transform: translateX(-5px) rotate(-4deg);
+  }
+  40%, 80% {
+    transform: translateX(5px) rotate(4deg);
+  }
+}
+
+@keyframes doraemon-droop {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+  100% {
+    transform: translateY(8px) rotate(-3.5deg);
+  }
+}
+
+@keyframes avatar-attentive-pulse {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.02);
+  }
+}
+
+@keyframes listening-wave {
+  0%, 100% {
+    height: 4px;
+  }
+  50% {
+    height: 14px;
+  }
+}
+
+/* ── State Class Bindings ────────────────────────────────────────────────── */
+
+/* 1. Idle — Subtle Breathing */
+.avatar-state-idle .doraemon-character-img {
+  animation: doraemon-breathe 3.4s ease-in-out infinite;
+}
+
+/* 2. Walking — Frame cycle drives the anime walk stride (no artificial wobble) */
+.avatar-state-walking .doraemon-character-img {
+  animation: none;
+}
+
+/* 3. Running — Rapid Cadence & Forward Sprint */
+.avatar-state-running .doraemon-character-img {
+  animation: doraemon-running-sprint 0.32s ease-in-out infinite;
+}
+
+/* 4. Greeting — Friendly Waving & Bounce */
+.avatar-state-greeting .doraemon-character-img {
+  animation: doraemon-greeting-bounce 0.44s ease-in-out infinite;
+}
+
+/* 5. Thinking — Head Tilt */
+.avatar-state-thinking .doraemon-character-img {
+  animation: doraemon-think-tilt 2.4s ease-in-out infinite;
+}
+
+/* 6. Success — Celebration Jump */
+.avatar-state-success .doraemon-character-img {
+  animation: doraemon-success-jump 0.8s ease-out 2;
+}
+
+/* 7. Error — Distress Wobble */
+.avatar-state-error .doraemon-character-img {
+  animation: doraemon-error-wobble 0.55s ease-in-out 3;
+}
+
+/* 8. Cancelled — Droop */
+.avatar-state-cancelled .doraemon-character-img {
+  animation: doraemon-droop 0.4s ease-out forwards;
+}
+
+/* 9. Listening — Attentive Pulse */
+.avatar-state-listening .doraemon-character-img {
+  animation: avatar-attentive-pulse 1.8s ease-in-out infinite;
+}
+
+.listening-bar {
+  display: inline-block;
+  width: 2.5px;
+  height: 8px;
+  background: #38bdf8;
+  border-radius: 2px;
+}
+.listening-bar.bar-1 { animation: listening-wave 0.6s ease-in-out infinite; }
+.listening-bar.bar-2 { animation: listening-wave 0.8s ease-in-out infinite 0.15s; }
+.listening-bar.bar-3 { animation: listening-wave 0.7s ease-in-out infinite 0.3s; }
+
+/* ── Speed Streaks & FX ──────────────────────────────────────────────────── */
+.doraemon-fx-running {
+  animation: doraemon-dash-lines 0.4s ease-in-out infinite alternate;
+}
+.doraemon-fx-running.doraemon-fx-walking {
+  animation: doraemon-dash-lines 0.62s ease-in-out infinite alternate;
+}
+@keyframes doraemon-dash-lines {
+  0% { transform: scaleX(0.8) translateX(-3px); opacity: 0.4; }
+  100% { transform: scaleX(1.2) translateX(2px); opacity: 0.9; }
+}
+
+.avatar-state-success .doraemon-fx-success {
+  animation: doraemon-sparkle-pop 0.6s ease-out infinite alternate;
+}
+@keyframes doraemon-sparkle-pop {
+  0% { transform: scale(0.9) translateY(0); }
+  100% { transform: scale(1.15) translateY(-4px); }
+}
+
+/* ── Base Image Styling ─────────────────────────────────────────────────── */
+.doraemon-character-img {
+  display: block;
+  user-select: none;
+  pointer-events: none;
+  transform-origin: center bottom;
+  transition: transform 0.22s ease-in-out, filter 0.3s ease;
+}
+
+/* ── Reduced Motion Override ─────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .doraemon-character-img,
+  .doraemon-fx-running,
+  .doraemon-fx-success {
+    animation: none !important;
+    transform: none !important;
+  }
+}

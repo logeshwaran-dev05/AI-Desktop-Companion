@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JM Vertex — AI Desktop Companion | Your Smart Desktop Assistant</title>
+  <meta name="description" content="An interactive, intelligent 2D/3D desktop companion with animated avatar movement, taskbar docking, voice control, and verified multi-path Windows application execution.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+</head>
+<body>
+  <!-- Background Glow & Cyber Grid -->
+  <div class="cyber-grid"></div>
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+
+  <!-- Header / Navigation (USE ONLY LOGO, PROPERLY SIZED, NO TEXT) -->
+  <header class="navbar">
+    <div class="nav-container">
+      <a href="#" class="brand-link" aria-label="JM Vertex Home">
+        <img src="assets/logo.png" alt="JM Vertex Logo" class="brand-logo-img">
+      </a>
+
+      <nav class="nav-menu">
+        <a href="#features" class="nav-link">Features</a>
+        <a href="#architecture" class="nav-link">Architecture</a>
+        <a href="#laptop-specs" class="nav-link">Laptop Specs</a>
+        <a href="#download" class="nav-link">Download</a>
+      </nav>
+
+      <div class="nav-actions">
+        <span class="version-badge">Windows 10 / 11 (64-bit)</span>
+        <a href="#download" class="btn btn-primary nav-download-btn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <span>Download .exe</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="container hero-grid">
+      <div class="hero-content">
+        <div class="hero-pill">
+          <span class="pill-dot"></span>
+          <span class="pill-text">Official Release • Standalone Windows Software</span>
+        </div>
+        
+        <h1 class="hero-title">
+          Your Smart <span class="gradient-text">Desktop Assistant</span>, Living Right on Your Screen
+        </h1>
+        
+        <p class="hero-description">
+          An interactive, transparent desktop companion with 8-frame walking animations, taskbar docking, hands-free Faster-Whisper voice control, and verified multi-path Windows OS automation for your laptop.
+        </p>
+
+        <div class="hero-cta-group">
+          <a href="downloads/JM-Vertex-AI-Companion-Setup.exe" download="JM-Vertex-AI-Companion-Setup.exe" class="btn btn-glow hero-download-btn" id="mainDownloadBtn">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <div class="btn-text-block">
+              <span class="btn-main-label">Download for Windows (.exe)</span>
+              <span class="btn-sub-label">v1.0.0 Stable • 64-bit • 1-Click Laptop Setup</span>
+            </div>
+          </a>
+
+          <a href="#laptop-specs" class="btn btn-secondary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            <span>System Requirements</span>
+          </a>
+        </div>
+
+        <div class="hero-badges">
+          <div class="badge-item">
+            <span class="badge-3d-check">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="url(#badgeGrad)"/><path d="M8 12l3 3 5-5" stroke="#050505" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <span>Win32 Process Verified</span>
+          </div>
+          <div class="badge-item">
+            <span class="badge-3d-check">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="url(#badgeGrad)"/><path d="M13 3L4 14h7v7l9-11h-7V3z" fill="#050505"/></svg>
+            </span>
+            <span>Smart Fallback to Web/Chrome</span>
+          </div>
+          <div class="badge-item">
+            <span class="badge-3d-check">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="url(#badgeGrad)"/><path d="M12 2a5 5 0 00-5 5v3H6a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2v-8a2 2 0 00-2-2h-1V7a5 5 0 00-5-5zm-3 8V7a3 3 0 016 0v3H9z" fill="#050505"/></svg>
+            </span>
+            <span>Offline Local AI Privacy</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hero Visual: Product Showcase Card (Truthful, Real Specs, Transparent Brand Logo) -->
+      <div class="hero-visual">
+        <div class="product-showcase-card">
+          <div class="card-glow"></div>
+          
+          <div class="showcase-header">
+            <div class="showcase-badge">
+              <span class="badge-dot-green"></span>
+              <span>STANDALONE DESKTOP COMPANION</span>
+            </div>
+            <span class="showcase-version">v1.0.0 STABLE</span>
+          </div>
+
+          <!-- Official Brand Logo (Clean transparent, appropriately sized) -->
+          <div class="showcase-logo-stage">
+            <img src="assets/logo.png" alt="JM Vertex AI Companion Logo" class="showcase-logo-img">
+          </div>
+
+          <!-- Real Software Technical Specifications -->
+          <div class="showcase-specs-list">
+            <div class="showcase-spec-item">
+              <div class="spec-icon-3d">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <rect x="2" y="3" width="20" height="14" rx="2" fill="url(#cyanGrad)"/>
+                  <line x1="8" y1="21" x2="16" y2="21" stroke="#00E676" stroke-width="2.5" stroke-linecap="round"/>
+                  <line x1="12" y1="17" x2="12" y2="21" stroke="#00E676" stroke-width="2.5" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div class="spec-detail">
+                <span class="spec-name">Operating System</span>
+                <span class="spec-data">Windows 10 / Windows 11 (64-bit)</span>
+              </div>
+            </div>
+
+            <div class="showcase-spec-item">
+              <div class="spec-icon-3d">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" fill="url(#greenGrad)"/>
+                  <path d="M2 17l10 5 10-5" stroke="#00E676" stroke-width="2.5" stroke-linecap="round"/>
+                  <path d="M2 12l10 5 10-5" stroke="#00E676" stroke-width="2.5" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div class="spec-detail">
+                <span class="spec-name">Runtime Architecture</span>
+                <span class="spec-data">Electron + Python FastAPI Backend</span>
+              </div>
+            </div>
+
+            <div class="showcase-spec-item">
+              <div class="spec-icon-3d">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="url(#goldGrad)"/>
+                  <path d="M9 12l2 2 4-4" stroke="#050505" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div class="spec-detail">
+                <span class="spec-name">AI Speech & Privacy</span>
+                <span class="spec-data">Local Faster-Whisper (100% Offline)</span>
+              </div>
+            </div>
+
+            <div class="showcase-spec-item">
+              <div class="spec-icon-3d">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" fill="url(#metalGrad)"/>
+                  <path d="M12 8v8M8 12l4 4 4-4" stroke="#050505" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div class="spec-detail">
+                <span class="spec-name">Package Delivery</span>
+                <span class="spec-data">1-Click Installer Executable (.exe)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Direct Download Action Bar -->
+          <div class="showcase-download-bar">
+            <a href="downloads/JM-Vertex-AI-Companion-Setup.exe" download="JM-Vertex-AI-Companion-Setup.exe" class="btn btn-glow btn-full">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>Download Installer (.exe)</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Multi-Path Fallback Flowchart Section (with 3D Icons) -->
+  <section id="architecture" class="section architecture-section">
+    <div class="container">
+      <div class="section-header text-center">
+        <span class="section-tag">RESILIENT EXECUTION ARCHITECTURE</span>
+        <h2 class="section-title">Never Fails Blindly: The 3-Tier Multi-Path Pipeline</h2>
+        <p class="section-subtitle">Unlike legacy assistants that throw errors if an application isn't found, JM Vertex gracefully falls back to your preferred browser and validates execution.</p>
+      </div>
+
+      <div class="pipeline-grid">
+        <!-- 3D Pipeline 01 -->
+        <div class="pipeline-card">
+          <div class="card-number">01</div>
+          <div class="card-3d-box">
+            <svg class="icon-3d-mesh" viewBox="0 0 64 64" fill="none">
+              <circle cx="32" cy="32" r="28" fill="url(#iconBgGrad)" stroke="rgba(0,230,118,0.3)" stroke-width="1.5"/>
+              <rect x="24" y="14" width="16" height="24" rx="8" fill="url(#greenGrad)" filter="url(#drop3d)"/>
+              <path d="M18 28 C18 42, 46 42, 46 28" stroke="#00E676" stroke-width="3.5" stroke-linecap="round"/>
+              <line x1="32" y1="42" x2="32" y2="50" stroke="#00E676" stroke-width="3.5" stroke-linecap="round"/>
+              <line x1="22" y1="50" x2="42" y2="50" stroke="#00E676" stroke-width="3.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3 class="pipeline-step-title">Intent Resolution</h3>
+          <p class="pipeline-step-desc">Whisper STT converts spoken audio into structured command entities (e.g. action: <code>open_application</code>, target: <code>YouTube</code>).</p>
+          <div class="card-tag">Faster-Whisper AI</div>
+        </div>
+
+        <div class="pipeline-arrow">➔</div>
+
+        <!-- 3D Pipeline 02 -->
+        <div class="pipeline-card">
+          <div class="card-number">02</div>
+          <div class="card-3d-box">
+            <svg class="icon-3d-mesh" viewBox="0 0 64 64" fill="none">
+              <circle cx="32" cy="32" r="28" fill="url(#iconBgGrad)" stroke="rgba(0,230,118,0.3)" stroke-width="1.5"/>
+              <rect x="14" y="16" width="36" height="24" rx="4" fill="url(#cyanGrad)" filter="url(#drop3d)"/>
+              <line x1="18" y1="22" x2="46" y2="22" stroke="rgba(0,0,0,0.3)" stroke-width="2"/>
+              <rect x="18" y="26" width="12" height="8" rx="2" fill="#00FF88"/>
+              <path d="M26 40 L38 40 L42 48 L22 48 Z" fill="url(#metalGrad)"/>
+            </svg>
+          </div>
+          <h3 class="pipeline-step-title">Native Win32 Discovery</h3>
+          <p class="pipeline-step-desc">Scans 32/64-bit Program Files, Start Menu shortcuts, and UWP app registries to check if a local desktop executable exists.</p>
+          <div class="card-tag">Local Windows Discovery</div>
+        </div>
+
+        <div class="pipeline-arrow">➔</div>
+
+        <!-- 3D Pipeline 03 -->
+        <div class="pipeline-card highlight-card">
+          <div class="card-number">03</div>
+          <div class="card-3d-box">
+            <svg class="icon-3d-mesh" viewBox="0 0 64 64" fill="none">
+              <circle cx="32" cy="32" r="28" fill="url(#iconBgHighlight)" stroke="#00E676" stroke-width="2"/>
+              <path d="M34 10 L18 34 L32 34 L30 54 L48 28 L34 28 Z" fill="url(#goldGrad)" filter="url(#drop3d)"/>
+            </svg>
+          </div>
+          <h3 class="pipeline-step-title">Smart Web Fallback</h3>
+          <p class="pipeline-step-desc">If the native application is missing, it detects your default browser (Chrome/Edge/Brave) and opens the verified web service seamlessly.</p>
+          <div class="card-tag tag-green">Zero-Failure Guarantee</div>
+        </div>
+
+        <div class="pipeline-arrow">➔</div>
+
+        <!-- 3D Pipeline 04 -->
+        <div class="pipeline-card">
+          <div class="card-number">04</div>
+          <div class="card-3d-box">
+            <svg class="icon-3d-mesh" viewBox="0 0 64 64" fill="none">
+              <circle cx="32" cy="32" r="28" fill="url(#iconBgGrad)" stroke="rgba(0,230,118,0.3)" stroke-width="1.5"/>
+              <path d="M32 12 L48 18 C48 34, 38 46, 32 52 C26 46, 16 34, 16 18 Z" fill="url(#greenGrad)" filter="url(#drop3d)"/>
+              <path d="M26 31 L30 35 L38 25" stroke="#050505" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <h3 class="pipeline-step-title">Truthful Verification</h3>
+          <p class="pipeline-step-desc">Queries the Windows <code>tasklist</code> process table to ensure the browser or desktop window actually spawned before reporting success.</p>
+          <div class="card-tag">Honest Process Check</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core Features Grid (with 3D Icons) -->
+  <section id="features" class="section features-section">
+    <div class="container">
+      <div class="section-header text-center">
+        <span class="section-tag">DESIGNED FOR WINDOWS LAPTOPS</span>
+        <h2 class="section-title">Built with Cutting-Edge Desktop Technologies</h2>
+        <p class="section-subtitle">Everything needed for a smooth, intelligent, and interactive desktop assistant that stays out of your way until called.</p>
+      </div>
+
+      <div class="features-grid">
+        <!-- 3D Feature 1: Robot Avatar -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg class="icon-3d-feat" viewBox="0 0 54 54" fill="none">
+              <rect x="11" y="16" width="32" height="24" rx="10" fill="url(#cyanGrad)" filter="url(#drop3d)"/>
+              <rect x="15" y="21" width="24" height="12" rx="4" fill="#0B131C"/>
+              <circle cx="21" cy="27" r="2.5" fill="#00FF88"/>
+              <circle cx="33" cy="27" r="2.5" fill="#00FF88"/>
+              <line x1="27" y1="10" x2="27" y2="16" stroke="#00E676" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="27" cy="8" r="3.5" fill="#00FF88"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">8-Frame Animated Avatar</h3>
+          <p class="feature-desc">Authentic animated walk cycle strolling across your desktop at 60 FPS, docking neatly above your taskbar without obstructing mouse clicks.</p>
+          <div class="feature-footer">Transparent Click-Through Canvas</div>
+        </div>
+
+        <!-- 3D Feature 2: Whisper STT -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg class="icon-3d-feat" viewBox="0 0 54 54" fill="none">
+              <rect x="20" y="10" width="14" height="22" rx="7" fill="url(#greenGrad)" filter="url(#drop3d)"/>
+              <path d="M14 24 C14 34, 40 34, 40 24" stroke="#00E676" stroke-width="2.8" stroke-linecap="round"/>
+              <line x1="27" y1="34" x2="27" y2="42" stroke="#00E676" stroke-width="2.8" stroke-linecap="round"/>
+              <line x1="19" y1="42" x2="35" y2="42" stroke="#00E676" stroke-width="2.8" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Hands-Free Whisper Speech-to-Text</h3>
+          <p class="feature-desc">Integrated Faster-Whisper model processes voice commands locally with exceptional speed and minimal latency.</p>
+          <div class="feature-footer">Offline Speech Processing</div>
+        </div>
+
+        <!-- 3D Feature 3: FastAPI Engine -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg class="icon-3d-feat" viewBox="0 0 54 54" fill="none">
+              <circle cx="27" cy="27" r="16" fill="url(#metalGrad)" stroke="rgba(0,230,118,0.4)" stroke-width="2"/>
+              <path d="M29 13 L17 31 L27 31 L25 45 L39 25 L29 25 Z" fill="url(#goldGrad)" filter="url(#drop3d)"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">FastAPI Task State Machine</h3>
+          <p class="feature-desc">Asynchronous state lifecycle (PENDING &rarr; PLANNING &rarr; EXECUTING &rarr; VERIFYING &rarr; COMPLETED) ensures strict traceability.</p>
+          <div class="feature-footer">Robust Microservice Backend</div>
+        </div>
+
+        <!-- 3D Feature 4: Safe Win32 Spawner -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg class="icon-3d-feat" viewBox="0 0 54 54" fill="none">
+              <path d="M27 8 L42 14 C42 29, 33 39, 27 45 C21 39, 12 29, 12 14 Z" fill="url(#cyanGrad)" filter="url(#drop3d)"/>
+              <path d="M22 25 L26 29 L33 20" stroke="#050505" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Safe Win32 Subprocess Spawner</h3>
+          <p class="feature-desc">Strict security policy enforcement prevents arbitrary shell injection while allowing approved desktop and web applications.</p>
+          <div class="feature-footer">Policy & Security Guard</div>
+        </div>
+
+        <!-- 3D Feature 5: Battery Friendly -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg class="icon-3d-feat" viewBox="0 0 54 54" fill="none">
+              <rect x="12" y="16" width="30" height="22" rx="4" fill="url(#metalGrad)" stroke="#00E676" stroke-width="1.8"/>
+              <rect x="42" y="22" width="4" height="10" rx="1.5" fill="#00E676"/>
+              <rect x="16" y="20" width="18" height="14" rx="2" fill="url(#greenGrad)" filter="url(#drop3d)"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Laptop Battery Friendly</h3>
+          <p class="feature-desc">Optimized rendering loop with idle sleep states. Consumes less than 1% CPU when docked in standby mode on your laptop.</p>
+          <div class="feature-footer">Power Efficiency Tuned</div>
+        </div>
+
+        <!-- 3D Feature 6: Hardware Signature -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg class="icon-3d-feat" viewBox="0 0 54 54" fill="none">
+              <circle cx="27" cy="18" r="8" fill="none" stroke="url(#metalGrad)" stroke-width="3.5"/>
+              <rect x="14" y="24" width="26" height="20" rx="6" fill="url(#greenGrad)" filter="url(#drop3d)"/>
+              <circle cx="27" cy="33" r="2.5" fill="#050505"/>
+              <line x1="27" y1="35" x2="27" y2="39" stroke="#050505" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Specified Laptop Authorization</h3>
+          <p class="feature-desc">Detects hardware profile and machine UUID to register and authorize your specific laptop with zero external cloud dependencies.</p>
+          <div class="feature-footer">Hardware Signature Binding</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Laptop Specifications & Requirements -->
+  <section id="laptop-specs" class="section specs-section">
+    <div class="container">
+      <div class="specs-wrapper">
+        <div class="specs-info">
+          <span class="section-tag">HARDWARE VERIFICATION</span>
+          <h2 class="section-title">Laptop Compatibility Matrix</h2>
+          <p class="section-subtitle">Engineered to run seamlessly across all modern Windows laptops, from ultrabooks to high-performance workstations.</p>
+
+          <div class="specs-list">
+            <div class="spec-row">
+              <span class="spec-label">Operating System</span>
+              <span class="spec-value text-green">Windows 10 / Windows 11 (64-bit)</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">Processor</span>
+              <span class="spec-value">Intel Core i3 / AMD Ryzen 3 or higher</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">RAM Memory</span>
+              <span class="spec-value">4 GB Minimum (8 GB Recommended)</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">Storage Required</span>
+              <span class="spec-value">~350 MB Free Disk Space</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">Audio Input</span>
+              <span class="spec-value">Built-in Laptop Mic or USB Headset</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">Browsers Supported</span>
+              <span class="spec-value">Google Chrome, Microsoft Edge, Brave</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="specs-card-preview">
+          <div class="laptop-mockup">
+            <div class="laptop-screen">
+              <div class="laptop-header">
+                <span class="circle-sm red"></span>
+                <span class="circle-sm yellow"></span>
+                <span class="circle-sm green"></span>
+                <span class="laptop-label">Laptop Compatibility Scanner</span>
+              </div>
+              <div class="laptop-code-body">
+                <p><span class="c-green">[INFO]</span> Validating Windows laptop profile...</p>
+                <p><span class="c-blue">[CPU]</span> Intel(R) Core(TM) / AMD Ryzen x64</p>
+                <p><span class="c-blue">[OS]</span> Windows 10/11 64-bit Architecture</p>
+                <p><span class="c-blue">[MIC]</span> Integrated Microphone &mdash; Supported</p>
+                <p><span class="c-green">[PASS]</span> Laptop profile verified for 1-click execution.</p>
+                <p><span class="c-highlight">&gt;&gt; Ready for 1-Click Installation!</span></p>
+              </div>
+            </div>
+            <div class="laptop-base"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Download Section -->
+  <section id="download" class="section download-section">
+    <div class="container text-center">
+      <div class="download-card">
+        <div class="download-badge">OFFICIAL 1-CLICK INSTALLER</div>
+        <h2 class="download-title">Download JM Vertex AI Companion for Your Laptop</h2>
+        <p class="download-subtitle">
+          Download the standalone Windows setup executable. Double-click to install and your companion will automatically launch with complete voice and automation features.
+        </p>
+
+        <div class="download-action-box">
+          <a href="downloads/JM-Vertex-AI-Companion-Setup.exe" download="JM-Vertex-AI-Companion-Setup.exe" class="btn btn-glow btn-lg" id="secondaryDownloadBtn">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <div class="btn-text-block">
+              <span class="btn-main-label">Download JM-Vertex-AI-Companion-Setup.exe</span>
+              <span class="btn-sub-label">Version 1.0.0 • Windows 10/11 (64-bit) • Clean Tested Binary</span>
+            </div>
+          </a>
+        </div>
+
+        <div class="download-instructions">
+          <h4 class="instructions-title">3 Simple Steps to Work on Your Laptop:</h4>
+          <div class="steps-grid">
+            <div class="step-card">
+              <div class="step-num-3d">1</div>
+              <div class="step-heading">Download Installer</div>
+              <div class="step-text">Save <code>JM-Vertex-AI-Companion-Setup.exe</code> to your laptop's Downloads folder.</div>
+            </div>
+            <div class="step-card">
+              <div class="step-num-3d">2</div>
+              <div class="step-heading">Run Setup Wizard</div>
+              <div class="step-text">Double-click the installer. It registers your hardware and creates Desktop shortcuts.</div>
+            </div>
+            <div class="step-card">
+              <div class="step-num-3d">3</div>
+              <div class="step-heading">Launch Companion</div>
+              <div class="step-text">Double-click the desktop shortcut. The companion docks above your taskbar ready to assist!</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ Section -->
+  <section class="section faq-section">
+    <div class="container">
+      <div class="section-header text-center">
+        <span class="section-tag">COMMON QUESTIONS</span>
+        <h2 class="section-title">Frequently Asked Questions</h2>
+      </div>
+
+      <div class="faq-accordion">
+        <div class="faq-item">
+          <div class="faq-question">
+            <span>How does the companion run on my specified laptop?</span>
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            The installer registers your laptop's machine identifier and hardware profile. It configures the local FastAPI orchestrator and Electron desktop window to automatically dock right above your Windows taskbar.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question">
+            <span>What happens if an app like Spotify or YouTube isn't installed?</span>
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            That is the strength of JM Vertex's Smart Multi-Path Fallback! If Spotify or YouTube desktop apps are missing, it instantly detects your installed browser (Google Chrome, Edge, or Brave) and launches the official web application without failing.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question">
+            <span>Does it block my mouse clicks or desktop work?</span>
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            No. The avatar window features transparent click-through capabilities. You can click on any folders, icons, or background windows underneath the companion without accidental interference.
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <div class="faq-question">
+            <span>Does it require an active internet connection?</span>
+            <span class="faq-toggle">+</span>
+          </div>
+          <div class="faq-answer">
+            The Faster-Whisper speech engine and native Windows application launching operate 100% locally and offline. An internet connection is only needed when using web fallbacks (e.g. streaming YouTube or online search).
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer (USE ONLY LOGO, PROPERLY SIZED) -->
+  <footer class="footer">
+    <div class="container footer-content">
+      <div class="footer-brand">
+        <a href="#" class="brand-link" aria-label="JM Vertex Home">
+          <img src="assets/logo.png" alt="JM Vertex Logo" class="brand-logo-img-footer">
+        </a>
+        <p class="footer-tagline">Your Smart Desktop Assistant &mdash; Designed by JM Vertex Technologies.</p>
+        <p class="footer-credits">
+          Engineering Team: <strong>Logeshwaran D</strong> (Lead), <strong>Madhan M</strong> (Frontend), <strong>Hariram K S</strong> (Backend), <strong>Booviha M</strong> (AI Engine).
+        </p>
+      </div>
+
+      <div class="footer-links">
+        <div class="link-column">
+          <span class="column-title">Product</span>
+          <a href="#features">Features</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#laptop-specs">Laptop Compatibility</a>
+          <a href="#download">Download .exe</a>
+        </div>
+        <div class="link-column">
+          <span class="column-title">Resources</span>
+          <a href="https://github.com/logeshwaran-dev05/AI-Desktop-Companion" target="_blank" rel="noopener">GitHub Repository</a>
+          <a href="#architecture">Architecture</a>
+          <a href="#download">Installation Guide</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div class="container footer-bottom-inner">
+        <span>&copy; 2026 JM Vertex Technologies. All rights reserved.</span>
+        <span>Version 1.0.0-release • Windows 10/11 Architecture</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Reusable 3D Gradient Definitions -->
+  <svg width="0" height="0" style="position: absolute;">
+    <defs>
+      <!-- Green Neon 3D Gradient -->
+      <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#39FF14"/>
+        <stop offset="40%" stop-color="#00E676"/>
+        <stop offset="100%" stop-color="#047857"/>
+      </linearGradient>
+
+      <!-- Neon Green Single Gradient -->
+      <linearGradient id="neonGreenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#00FF88"/>
+        <stop offset="100%" stop-color="#00B050"/>
+      </linearGradient>
+
+      <!-- Badge 3D Gradient -->
+      <linearGradient id="badgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#00FF88"/>
+        <stop offset="100%" stop-color="#00E676"/>
+      </linearGradient>
+
+      <!-- Gold / Amber 3D Gradient -->
+      <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#FFE600"/>
+        <stop offset="50%" stop-color="#FFBD2E"/>
+        <stop offset="100%" stop-color="#FF6F00"/>
+      </linearGradient>
+
+      <!-- Cyan / Blue 3D Gradient -->
+      <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#00F0FF"/>
+        <stop offset="50%" stop-color="#00B4D8"/>
+        <stop offset="100%" stop-color="#0077B6"/>
+      </linearGradient>
+
+      <!-- Metallic Chrome Gradient -->
+      <linearGradient id="metalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#E2E8F0"/>
+        <stop offset="50%" stop-color="#94A3B8"/>
+        <stop offset="100%" stop-color="#334155"/>
+      </linearGradient>
+
+      <!-- 3D Card Background Gradient -->
+      <radialGradient id="iconBgGrad" cx="40%" cy="30%" r="70%">
+        <stop offset="0%" stop-color="rgba(0, 230, 118, 0.18)"/>
+        <stop offset="100%" stop-color="rgba(11, 19, 29, 0.9)"/>
+      </radialGradient>
+
+      <!-- 3D Card Highlight Background -->
+      <radialGradient id="iconBgHighlight" cx="40%" cy="30%" r="70%">
+        <stop offset="0%" stop-color="rgba(0, 230, 118, 0.35)"/>
+        <stop offset="100%" stop-color="rgba(15, 28, 40, 0.95)"/>
+      </radialGradient>
+
+      <!-- 3D Drop Shadow Filter -->
+      <filter id="drop3d" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="rgba(0, 0, 0, 0.5)"/>
+      </filter>
+    </defs>
+  </svg>
+
+  <script src="app.js"></script>
+</body>
+</html>

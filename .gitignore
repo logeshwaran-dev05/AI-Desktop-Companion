@@ -24,6 +24,8 @@ npm-debug.log*
 .vscode/
 .DS_Store
 Thumbs.db
+*.zip
+!landing-page/downloads/*.zip
 
 # Python cache
 __pycache__/
@@ -33,3 +35,6 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
+
+# Portable binaries
+portable-app/

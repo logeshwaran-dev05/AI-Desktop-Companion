@@ -10,7 +10,9 @@
     "lint": "npm --prefix desktop run lint",
     "preview": "npm --prefix desktop run preview",
     "electron": "npm --prefix desktop run electron",
-    "app": "npm --prefix desktop run app"
+    "app": "npm --prefix desktop run app",
+    "landing": "vite landing-page --port 3000",
+    "build:installer": "powershell -ExecutionPolicy Bypass -File ./build-installer.ps1"
   },
   "devDependencies": {
     "concurrently": "^9.0.0",

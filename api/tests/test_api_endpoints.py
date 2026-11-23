@@ -25,6 +25,7 @@ class TestAPIEndpoints(unittest.TestCase):
     def setUp(self):
         # Clear shared tasks store before each test
         main_module.tasks.clear()
+        main_module.orchestrator.tasks.clear()
         # Reset mock adapter on orchestrator
         self.mock_adapter = MagicMock()
         main_module.orchestrator.adapter = self.mock_adapter

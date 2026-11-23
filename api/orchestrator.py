@@ -247,7 +247,12 @@ class ApplicationResolver:
         "math": "calculator",
         "chrome": "chrome",
         "google chrome": "chrome",
-        "google": "chrome",
+        "google": "google",
+        "youtube": "youtube",
+        "yt": "youtube",
+        "spotify": "spotify",
+        "netflix": "netflix",
+        "github": "github",
         "browser": "chrome",
         "my browser": "chrome",
         "web browser": "chrome",
@@ -298,7 +303,7 @@ class ApplicationResolver:
         Returns: (is_valid, error_code, error_message)
         """
         action = req.get("action")
-        if not action or action not in ("open_application", "launch_application"):
+        if not action or action not in ("open_application", "launch_application", "search_web_app"):
             return False, "ERR_INVALID_INTENT", f"Action '{action}' is not supported."
 
         app_id = req.get("application_id")
@@ -334,7 +339,7 @@ class ApplicationResolver:
             if clean in (
                 app["app_name"].lower(),
                 app["app_id"].lower(),
-                app["executable"].lower(),
+                app.get("executable", "").lower(),
                 app["app_name"].replace(" ", "").lower(),
             ):
                 return app
@@ -391,8 +396,8 @@ class PermissionEvaluator:
         clean_action = (action_name or "").strip()
         clean_target = (target or "").strip().lower()
 
-        # Milestone 1: Only "open_application" is supported
-        if clean_action != "open_application":
+        # Check supported actions
+        if clean_action not in ("open_application", "search_web_app"):
             return AuthorizationDecision(
                 decision_id=decision_id,
                 permission_status="denied",
@@ -406,6 +411,16 @@ class PermissionEvaluator:
                 permission_status="denied",
                 requires_user_approval=False,
                 reason="Target cannot be empty.",
+            )
+
+        # Web search actions are allowlisted for direct execution
+        if clean_action == "search_web_app":
+            return AuthorizationDecision(
+                decision_id=decision_id,
+                permission_status="granted",
+                requires_user_approval=False,
+                approval_reference="user_auto_allowlist_web_search",
+                reason=f"Web search on '{target}' is allowlisted.",
             )
 
         # 1. Milestone 1 Allowlist Check: Direct launch granted for Notepad
@@ -425,7 +440,7 @@ class PermissionEvaluator:
             if clean_target in (
                 app["app_name"].lower(),
                 app["app_id"].lower(),
-                app["executable"].lower(),
+                app.get("executable", "").lower(),
             )
         ]
 
@@ -465,6 +480,7 @@ class TaskOrchestrator:
         tasks: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         # Initialize components
+        self.planner = planner or TaskPlanner()
         self.adapter = adapter or WindowsAutomationAdapter()
         # Initialize SQLite task repository
         self.repo = TaskRepository()
@@ -668,7 +684,7 @@ class TaskOrchestrator:
         if plan_response.status == "unsupported" or not plan_response.steps:
             if is_launch_command:
                 resolved_app = self.resolver.resolve(target_candidate) or self.resolver.resolve(clean_cmd)
-                if resolved_app:
+                if resolved_app and resolved_app.get("allowlisted", True) is not False:
                     task["intent"] = "open_application"
                     task["steps"] = [{
                         "step_id": 1,
@@ -697,6 +713,7 @@ class TaskOrchestrator:
                     "target": step.target,
                     "depends_on": getattr(step, "depends_on", []),
                     "expected_outcome": step.expected_outcome,
+                    "parameters": getattr(step, "parameters", {}),
                 }
                 for step in plan_response.steps
             ]
@@ -707,6 +724,12 @@ class TaskOrchestrator:
         step_data = steps_list[0]
         action_name = str(step_data.get("action", ""))
         raw_target = str(step_data.get("target", ""))
+        raw_params = step_data.get("parameters") if isinstance(step_data.get("parameters"), dict) else {}
+        if not raw_params and hasattr(plan_response, "entities"):
+            entities_params = getattr(plan_response.entities, "parameters", {})
+            if isinstance(entities_params, dict):
+                raw_params = entities_params
+        step_params = raw_params or {}
 
         resolved_app = self.resolver.resolve(raw_target)
         if not resolved_app and raw_target.lower() not in ("notepad", "notepad.exe"):
@@ -719,16 +742,18 @@ class TaskOrchestrator:
         canonical_target = str(resolved_app["app_name"]) if resolved_app else raw_target
         app_id = str(resolved_app.get("app_id", "notepad")) if resolved_app else ("notepad" if raw_target.lower().startswith("notepad") else raw_target.lower())
         step_data["target"] = canonical_target
+        step_data["parameters"] = step_params
 
         task["selected_application"] = canonical_target
         task["application_id"] = app_id
 
         # Generate StructuredActionRequest
+        structured_action = "search_web_app" if action_name == "search_web_app" else "launch_application"
         structured_req = StructuredActionRequest(
-            action="launch_application",
+            action=structured_action,
             application_id=app_id,
             target=canonical_target,
-            parameters={},
+            parameters=step_params,
             source=input_type,
         )
         task["structured_request"] = structured_req.model_dump()
@@ -780,6 +805,7 @@ class TaskOrchestrator:
             depends_on=step_data.get("depends_on", []),
             expected_outcome=step_data.get("expected_outcome", ""),
             parameters={},
+            parameters=step_params,
         )
 
         try:
@@ -997,6 +1023,7 @@ class TaskOrchestrator:
                 depends_on=step_data.get("depends_on", []),
                 expected_outcome=step_data.get("expected_outcome", ""),
                 parameters=merged_params,
+                parameters=step_data.get("parameters", {}),
             )
 
             try:
@@ -1055,6 +1082,94 @@ class TaskOrchestrator:
 
         # All steps processed – ensure final persistence
         self._persist_task(task_id)
+        return task
+        """Execute pending plan steps through policy evaluation, dispatch, and verification."""
+        task = self.tasks.get(task_id)
+        if not task:
+            raise KeyError(f"Task '{task_id}' not found.")
+
+        current_status = task["status"]
+
+        if current_status in self.state_machine.TERMINAL_STATES:
+            return task
+
+        steps = task.get("steps", [])
+        if not steps:
+            if current_status == "pending":
+                task["message"] = "No executable plan steps found for this task."
+            return task
+
+        for step_data in steps:
+            action_name = step_data.get("action", "")
+            target = step_data.get("target", "")
+            step_id = step_data.get("step_id", 1)
+
+            auth_dict = task.get("authorization")
+            if auth_dict and auth_dict.get("permission_status") == "granted":
+                auth = AuthorizationDecision.from_dict(auth_dict)
+            else:
+                auth = self.permission_evaluator.evaluate(task_id, action_name, target)
+                task["authorization"] = auth.to_dict()
+
+            if auth.permission_status == "requires_approval":
+                self.state_machine.transition(task, "requires_approval", auth.reason)
+                return task
+
+            if auth.permission_status == "denied":
+                self.state_machine.transition(task, "failed", auth.reason)
+                task["error_code"] = "ERR_PERMISSION_DENIED"
+                task["error_message"] = auth.reason
+                task["completed_at"] = current_iso_timestamp()
+                return task
+
+            self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
+            task["started_at"] = task["started_at"] or current_iso_timestamp()
+
+            plan_step = PlanStep(
+                step_id=step_id,
+                action=action_name,
+                target=target,
+                depends_on=step_data.get("depends_on", []),
+                expected_outcome=step_data.get("expected_outcome", ""),
+                parameters=step_data.get("parameters", {}),
+            )
+
+            exec_result: ExecutionResult = self.adapter.execute_plan_step(
+                step=plan_step,
+                task_id=task_id,
+                authorization=auth,
+                timeout_seconds=timeout_seconds,
+            )
+
+            task["active_action_id"] = exec_result.action_id
+
+            if exec_result.status == "completed":
+                self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
+                task["active_action_id"] = None
+                task["result"] = exec_result.to_dict()
+                task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
+                task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
+                task["duration_ms"] = exec_result.duration_ms
+                task["completed_at"] = exec_result.completed_at
+                task["message"] = f"Action '{action_name}' completed and verified successfully."
+
+            elif exec_result.status == "cancelled":
+                self.state_machine.transition(task, "cancelled", "Action was cancelled.")
+                task["active_action_id"] = None
+                task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
+                task["error_message"] = exec_result.error_message or "Action was cancelled."
+                task["completed_at"] = exec_result.completed_at
+                return task
+
+            else:
+                self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
+                task["active_action_id"] = None
+                task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
+                task["error_message"] = exec_result.error_message or "Action execution failed."
+                task["duration_ms"] = exec_result.duration_ms
+                task["completed_at"] = exec_result.completed_at
+                return task
+
         return task
 
     def approve_task(

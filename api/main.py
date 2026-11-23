@@ -26,7 +26,10 @@ from fastapi import FastAPI, HTTPException, Query, status
 from ai_engine.planner.task_planner import TaskPlanner
 from ai_engine.schemas.command_schema import CommandRequest
 from api.catalogue_routes import router as catalogue_router
+from api.orchestrator import DuplicateRequestError, VoiceServiceUnavailableError
 from api.orchestrator_instance import orchestrator
+
+planner = TaskPlanner()
 from api.schemas import (
     AppCatalogueItem,
     BrowserProfile,
@@ -113,6 +116,7 @@ def create_plan(request: PlanRequest):
                 "action": step.action,
                 "target": step.target,
                 "expected_outcome": step.expected_outcome,
+                "parameters": getattr(step, "parameters", {}),
             }
             for step in result.steps
         ],
@@ -323,6 +327,7 @@ def create_task(task: TaskCreate):
         command=task.command,
         auto_execute=task.auto_execute,
     )
+    tasks[created_task["task_id"]] = created_task
     return created_task
 
 
@@ -339,7 +344,7 @@ def get_task_status(task_id: str):
     """
     Get current task status.
     """
-    task = tasks.get(task_id)
+    task = orchestrator.tasks.get(task_id) or tasks.get(task_id)
     if task is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -362,7 +367,7 @@ def get_task_result(task_id: str):
     Final Task Result API: Get detailed execution result, verification evidence,
     and audit details for a task.
     """
-    task = tasks.get(task_id)
+    task = orchestrator.tasks.get(task_id) or tasks.get(task_id)
     if task is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -396,7 +401,7 @@ def execute_task(task_id: str, request: Optional[TaskExecuteRequest] = None):
     """
     Execute a pending task through policy evaluation, automation dispatch, and verification.
     """
-    task = tasks.get(task_id)
+    task = orchestrator.tasks.get(task_id) or tasks.get(task_id)
     if task is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -409,6 +414,7 @@ def execute_task(task_id: str, request: Optional[TaskExecuteRequest] = None):
             task_id=task_id,
             timeout_seconds=req.timeout_seconds,
         )
+        tasks[task_id] = updated_task
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -438,7 +444,7 @@ def approve_task(task_id: str, request: Optional[TaskApproveRequest] = None):
     """
     Approve a task paused in 'requires_approval' status and resume execution.
     """
-    task = tasks.get(task_id)
+    task = orchestrator.tasks.get(task_id) or tasks.get(task_id)
     if task is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -452,6 +458,7 @@ def approve_task(task_id: str, request: Optional[TaskApproveRequest] = None):
             approval_reference=req.approval_reference,
             timeout_seconds=req.timeout_seconds,
         )
+        tasks[task_id] = updated_task
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -481,7 +488,7 @@ def cancel_task(task_id: str):
     """
     Cancel an ongoing or pending task, terminating running subprocesses safely.
     """
-    task = tasks.get(task_id)
+    task = orchestrator.tasks.get(task_id) or tasks.get(task_id)
     if task is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -490,6 +497,7 @@ def cancel_task(task_id: str):
 
     try:
         updated_task = orchestrator.cancel_task(task_id)
+        tasks[task_id] = updated_task
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
