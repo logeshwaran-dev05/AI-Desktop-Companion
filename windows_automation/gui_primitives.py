@@ -49,6 +49,9 @@ if user32:
     user32.OpenClipboard.restype = wintypes.BOOL
     user32.CloseClipboard.restype = wintypes.BOOL
     user32.EmptyClipboard.restype = wintypes.BOOL
+    if hasattr(user32, "SetCursorPos"):
+        user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+        user32.SetCursorPos.restype = wintypes.BOOL
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -137,7 +140,7 @@ def press_vk_key(vk_code: int) -> None:
     user32.SendInput(2, arr, ctypes.sizeof(INPUT))
 
 
-def type_text(text: str, press_enter: bool = False, delay: float = 0.01) -> None:
+def type_text(text: str, press_enter: bool = True, delay: float = 0.01) -> None:
     """
     Type a string into the currently focused window with optional trailing Enter.
     Handles Unicode, punctuation, and multi-line text safely.
@@ -266,3 +269,75 @@ def focus_window_by_title(title_substring: str) -> bool:
         return True
 
     return False
+
+
+def mouse_move(x: int, y: int) -> None:
+    """Move mouse cursor to absolute screen coordinates (x, y)."""
+    if not user32:
+        return
+    user32.SetCursorPos(int(x), int(y))
+
+
+def mouse_click(x: Optional[int] = None, y: Optional[int] = None) -> None:
+    """Simulate a left mouse click at optional (x, y) coordinates."""
+    if not user32:
+        return
+    if x is not None and y is not None:
+        user32.SetCursorPos(int(x), int(y))
+        time.sleep(0.05)
+    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    time.sleep(0.05)
+    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+
+def clipboard_copy() -> str:
+    """
+    Triggers Ctrl+C on the active window and captures the copied text via pyperclip,
+    falling back to native Win32 clipboard reading.
+    """
+    press_hotkey("ctrl", "c")
+    time.sleep(0.1)
+    try:
+        import pyperclip
+        return pyperclip.paste()
+    except Exception:
+        return get_clipboard_text()
+
+
+def clipboard_paste(target_app: Optional[str] = None, text: Optional[str] = None) -> bool:
+    """
+    Focuses the target window (if specified) and triggers Ctrl+V.
+    If text is provided, copies text to clipboard before pasting (via pyperclip or set_clipboard_text).
+    """
+    if text:
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+        except Exception:
+            set_clipboard_text(text)
+        time.sleep(0.05)
+
+    if target_app and target_app not in {"active_window", ""}:
+        focus_window_by_title(target_app)
+        time.sleep(0.1)
+
+    press_hotkey("ctrl", "v")
+    return True
+
+
+def click_youtube_result(ordinal_index: int = 1) -> bool:
+    """
+    Focuses the YouTube/browser window and clicks the N-th video in search results.
+    ordinal_index: 1-based index (e.g. 1 for 1st video, 2 for 2nd video).
+    """
+    focus_window_by_title("YouTube") or focus_window_by_title("Chrome") or focus_window_by_title("Edge")
+    time.sleep(0.5)
+
+    idx = max(1, int(ordinal_index))
+    # Standard YouTube search layout coordinates on desktop screens
+    base_x = 520
+    base_y = 280 + (idx - 1) * 180
+
+    mouse_click(base_x, base_y)
+    return True
+

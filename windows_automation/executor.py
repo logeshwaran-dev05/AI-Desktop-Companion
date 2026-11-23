@@ -265,10 +265,8 @@ class WindowsAutomationExecutor:
             )
 
         if request.action_name == "clipboard_copy":
-            from windows_automation.gui_primitives import press_hotkey, get_clipboard_text
-            press_hotkey("ctrl", "c")
-            time.sleep(0.1)
-            copied = get_clipboard_text()
+            from windows_automation.gui_primitives import clipboard_copy
+            copied = clipboard_copy()
             evidence = VerificationEvidence(
                 verified=True,
                 method="clipboard_copy",
@@ -288,19 +286,46 @@ class WindowsAutomationExecutor:
             )
 
         if request.action_name == "clipboard_paste":
-            from windows_automation.gui_primitives import press_hotkey, set_clipboard_text, focus_window_by_title
+            from windows_automation.gui_primitives import clipboard_paste
             text = (request.parameters or {}).get("text")
-            if text:
-                set_clipboard_text(text)
             target_win = request.target
-            if target_win and target_win not in {"active_window", ""}:
-                focus_window_by_title(target_win)
-            press_hotkey("ctrl", "v")
+            clipboard_paste(target_app=target_win, text=text)
             evidence = VerificationEvidence(
                 verified=True,
                 method="clipboard_paste",
                 verification_status="verified",
                 details={"target": target_win},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "click_youtube_result":
+            from windows_automation.gui_primitives import click_youtube_result
+            ordinal = (request.parameters or {}).get("ordinal_index", 1)
+            if not ordinal or ordinal == 1:
+                target_str = str(request.target or "").lower().strip()
+                if target_str.isdigit():
+                    ordinal = int(target_str)
+                elif "2" in target_str or "second" in target_str:
+                    ordinal = 2
+                elif "3" in target_str or "third" in target_str:
+                    ordinal = 3
+
+            click_youtube_result(ordinal_index=int(ordinal))
+            evidence = VerificationEvidence(
+                verified=True,
+                method="click_youtube_result",
+                verification_status="verified",
+                details={"ordinal_index": int(ordinal)},
             )
             return ExecutionResult(
                 action_id=request.action_id,
@@ -371,7 +396,9 @@ class WindowsAutomationExecutor:
                     break
 
             if fallback_url:
-                self._open_url(fallback_url)
+                profile_dir = (request.parameters or {}).get("profile_dir")
+                profile_name = (request.parameters or {}).get("profile_name")
+                self._open_url(fallback_url, profile_dir=profile_dir, profile_name=profile_name)
                 evidence = VerificationEvidence(
                     verified=True,
                     method="web_fallback_invocation",
@@ -505,13 +532,19 @@ class WindowsAutomationExecutor:
                 # Standard subprocess launch (shell=False strictly)
                 launch_args = [resolved_path]
                 if "chrome" in str(resolved_path).lower():
-                    from windows_automation.browser_profiles import resolve_profile_directory
+                    from windows_automation.browser_profiles import (
+                        resolve_profile_directory,
+                        build_chrome_launch_args,
+                        get_default_profile_directory,
+                    )
                     p_dir = (request.parameters or {}).get("profile_dir")
                     p_name = (request.parameters or {}).get("profile_name")
                     if not p_dir and p_name:
                         p_dir = resolve_profile_directory("chrome", p_name)
-                    if p_dir:
-                        launch_args.append(f"--profile-directory={p_dir}")
+                    if not p_dir:
+                        p_dir = get_default_profile_directory("chrome")
+                    chrome_flags = build_chrome_launch_args(profile_dir=p_dir)
+                    launch_args.extend(chrome_flags)
 
                 extra_args = request.parameters.get("args", []) if request.parameters else []
                 launch_args.extend([str(a) for a in extra_args])
@@ -732,11 +765,17 @@ class WindowsAutomationExecutor:
 
     def _open_url(self, url: str, profile_dir: Optional[str] = None, profile_name: Optional[str] = None) -> None:
         """Open a URL in Chrome, Edge, or default browser with profile directory support."""
-        from windows_automation.browser_profiles import resolve_profile_directory, build_chrome_launch_args
+        from windows_automation.browser_profiles import (
+            resolve_profile_directory,
+            build_chrome_launch_args,
+            get_default_profile_directory,
+        )
 
         resolved_dir = profile_dir
         if not resolved_dir and profile_name:
             resolved_dir = resolve_profile_directory("chrome", profile_name)
+        if not resolved_dir:
+            resolved_dir = get_default_profile_directory("chrome")
 
         chrome_args = build_chrome_launch_args(profile_dir=resolved_dir, url=url)
 

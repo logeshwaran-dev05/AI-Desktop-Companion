@@ -73,6 +73,32 @@ def get_browser_profiles(browser: str = "chrome") -> List[Dict[str, Any]]:
         return []
 
 
+def get_default_profile_directory(browser: str = "chrome") -> Optional[str]:
+    """
+    Returns the most appropriate profile directory to avoid the Profile Picker dialog.
+    Reads 'last_used' from Local State, or falls back to 'Default' or the first available profile directory.
+    """
+    user_data_dir = get_chrome_user_data_path() if browser.lower() == "chrome" else get_edge_user_data_path()
+    local_state_file = os.path.join(user_data_dir, "Local State")
+    if os.path.exists(local_state_file):
+        try:
+            with open(local_state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            last_used = data.get("profile", {}).get("last_used")
+            if last_used:
+                return last_used
+            last_active = data.get("profile", {}).get("last_active_profiles", [])
+            if last_active and len(last_active) > 0:
+                return last_active[0]
+        except Exception:
+            pass
+
+    profiles = get_browser_profiles(browser)
+    if profiles:
+        return profiles[0]["directory"]
+    return None
+
+
 def resolve_profile_directory(browser: str = "chrome", requested_profile: Optional[str] = None) -> Optional[str]:
     """
     Fuzzy matches a user-requested profile name (e.g. 'loki', 'logesh', 'aimtech')
