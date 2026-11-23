@@ -346,7 +346,7 @@ class ApplicationResolver:
                 if app["app_id"] == aliased_id:
                     return app
 
-        # 3. Windows Application Catalogue (dynamic — covers Settings pages, built-ins, third-party)
+        # 3. Windows Application Catalogue (dynamic — covers Settings pages, built-ins, third‑party)
         catalogue_entry = _windows_catalogue.resolve_phrase(target)
         if catalogue_entry:
             return {
@@ -439,7 +439,7 @@ class PermissionEvaluator:
                 reason=f"Application '{matched_app}' is installed in catalogue but requires explicit user approval before launching.",
             )
 
-        # 3. Not in allowlist and not in catalogue -> Denied
+        # 3. Not in allowlist and not in catalogue → Denied
         return AuthorizationDecision(
             decision_id=decision_id,
             permission_status="denied",
@@ -465,7 +465,6 @@ class TaskOrchestrator:
         tasks: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         # Initialize components
-
         self.adapter = adapter or WindowsAutomationAdapter()
         # Initialize SQLite task repository
         self.repo = TaskRepository()
@@ -477,7 +476,7 @@ class TaskOrchestrator:
         self.permission_evaluator = PermissionEvaluator()
         self.resolver = ApplicationResolver()
         self.state_machine = TaskStateMachine()
-        # In‑memory register mapping idempotency_key -> task_id
+        # In‑memory register mapping idempotency_key → task_id
         self._idempotency_registry: Dict[str, str] = {}
 
     def _persist_task(self, task_id: str) -> None:
@@ -485,17 +484,6 @@ class TaskOrchestrator:
         task = self.tasks.get(task_id)
         if task:
             self.repo.update_task(task_id, task)
-
-
-        self.adapter = adapter or WindowsAutomationAdapter()
-        self.repo = TaskRepository()
-        # Load persisted tasks into in‑memory dict for fast access
-        self.tasks: Dict[str, Dict[str, Any]] = tasks if tasks is not None else {t["task_id"]: t for t in self.repo.list_tasks()}
-        self.permission_evaluator = PermissionEvaluator()
-        self.resolver = ApplicationResolver()
-        self.state_machine = TaskStateMachine()
-        # In-memory register mapping idempotency_key -> task_id
-        self._idempotency_registry: Dict[str, str] = {}
 
     # -----------------------------------------------------------------------
     # Application Catalogue
@@ -572,18 +560,17 @@ class TaskOrchestrator:
     ) -> Dict[str, Any]:
         """
         Common execution pipeline for all user requests (voice and text).
-        
+
         Flow:
-        User Input -> Voice/Text Processing -> AI Intent -> Application Matching ->
-        Windows Automation -> Verification -> Task Status (launched / failed)
+        User Input → Voice/Text Processing → AI Intent → Application Matching →
+        Windows Automation → Verification → Task Status (launched / failed)
         """
         # Step 1: Idempotency Gate
-        if idempotency_key:
-            if idempotency_key in self._idempotency_registry:
-                existing_id = self._idempotency_registry[idempotency_key]
-                raise DuplicateRequestError(
-                    f"Duplicate request detected for idempotency key '{idempotency_key}'. Task ID: '{existing_id}'."
-                )
+        if idempotency_key and idempotency_key in self._idempotency_registry:
+            existing_id = self._idempotency_registry[idempotency_key]
+            raise DuplicateRequestError(
+                f"Duplicate request detected for idempotency key '{idempotency_key}'. Task ID: '{existing_id}'."
+            )
 
         # Step 2: Task Record Initialization
         task_id = task_id or f"task_{uuid4()}"
@@ -652,7 +639,7 @@ class TaskOrchestrator:
         plan_response = self.planner.process_command(CommandRequest(text=command, input_type=input_type))
         task["intent"] = plan_response.intent
 
-        # Step 4.1: Check for Ambiguous Command or Clarification Required
+        # Step 4.1: Ambiguity / Clarification
         clean_cmd = (command or "").strip().lower()
         is_launch_command = any(
             clean_cmd.startswith(prefix)
@@ -677,22 +664,19 @@ class TaskOrchestrator:
             task["completed_at"] = current_iso_timestamp()
             return task
 
-        # Step 4.2: Handle Unsupported or Missing Steps with Alternative Phrase / Category Recovery
+        # Step 4.2: Unsupported / Missing Steps – try fallback resolution
         if plan_response.status == "unsupported" or not plan_response.steps:
             if is_launch_command:
-                # Try category / alternative phrase resolution (e.g. "Can you open my browser?")
                 resolved_app = self.resolver.resolve(target_candidate) or self.resolver.resolve(clean_cmd)
                 if resolved_app:
                     task["intent"] = "open_application"
-                    task["steps"] = [
-                        {
-                            "step_id": 1,
-                            "action": "open_application",
-                            "target": resolved_app["app_name"],
-                            "depends_on": [],
-                            "expected_outcome": f"{resolved_app['app_name']} should open successfully.",
-                        }
-                    ]
+                    task["steps"] = [{
+                        "step_id": 1,
+                        "action": "open_application",
+                        "target": resolved_app["app_name"],
+                        "depends_on": [],
+                        "expected_outcome": f"{resolved_app['app_name']} should open successfully.",
+                    }]
                 else:
                     self.state_machine.transition(task, "failed", f"Unknown application: '{target_candidate}' is not recognized.")
                     task["error_code"] = "ERR_UNKNOWN_APPLICATION"
@@ -788,10 +772,15 @@ class TaskOrchestrator:
             task, "launching", f"Dispatching '{action_name}' on '{canonical_target}' to Windows Automation."
         )
 
-                                # Build the PlanStep with merged parameters
-
-
-
+        # Build the PlanStep with merged parameters (no extra params at this point)
+        plan_step = PlanStep(
+            step_id=step_data.get("step_id", 1),
+            action=action_name,
+            target=canonical_target,
+            depends_on=step_data.get("depends_on", []),
+            expected_outcome=step_data.get("expected_outcome", ""),
+            parameters={},
+        )
 
         try:
             exec_result: ExecutionResult = self.adapter.execute_plan_step(
@@ -808,6 +797,7 @@ class TaskOrchestrator:
             task["completed_at"] = current_iso_timestamp()
             return task
 
+        # Record execution result
         task["active_action_id"] = exec_result.action_id
         task["duration_ms"] = exec_result.duration_ms
         task["completed_at"] = exec_result.completed_at
@@ -947,8 +937,7 @@ class TaskOrchestrator:
 
     def execute_task(self, task_id: str, timeout_seconds: float = 10.0) -> Dict[str, Any]:
         """Execute pending plan steps through policy evaluation, dispatch, and verification.
-        The task state is persisted to SQLite after each mutation.
-        """
+        The task state is persisted to SQLite after each mutation."""
         task = self.tasks.get(task_id)
         if not task:
             raise KeyError(f"Task '{task_id}' not found.")
@@ -958,10 +947,9 @@ class TaskOrchestrator:
         if current_status in self.state_machine.TERMINAL_STATES:
             return task
 
-                # Retrieve and execute each plan step sequentially, passing context between steps
         steps = task.get("steps", [])
-        # Context dict to pass data between steps (e.g., clipboard text)
         context: Dict[str, Any] = {}
+
         if not steps:
             if current_status == "pending":
                 task["message"] = "No executable plan steps found for this task."
@@ -976,7 +964,6 @@ class TaskOrchestrator:
             # Merge any explicit parameters with context from previous step
             step_params = step_data.get("parameters", {}) or {}
             merged_params = {**context, **step_params} if context else step_params
-            # Store merged parameters back for potential later use
             step_data["parameters"] = merged_params
 
             auth_dict = task.get("authorization")
@@ -1003,7 +990,6 @@ class TaskOrchestrator:
             self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
             task["started_at"] = task["started_at"] or current_iso_timestamp()
 
-            # Build PlanStep with merged parameters
             plan_step = PlanStep(
                 step_id=step_id,
                 action=action_name,
@@ -1012,7 +998,6 @@ class TaskOrchestrator:
                 expected_outcome=step_data.get("expected_outcome", ""),
                 parameters=merged_params,
             )
-
 
             try:
                 exec_result: ExecutionResult = self.adapter.execute_plan_step(
@@ -1070,756 +1055,6 @@ class TaskOrchestrator:
 
         # All steps processed – ensure final persistence
         self._persist_task(task_id)
-        return task
-
-                 (e.g., clipboard text)
-                context: Dict[str, Any] = {}
-                if not steps:
-                    if current_status == "pending":
-                        task["message"] = "No executable plan steps found for this task."
-                        self._persist_task(task_id)
-                    return task
-
-                for step_data in steps:
-                    action_name = step_data.get("action", "")
-                    target = step_data.get("target", "")
-                    step_id = step_data.get("step_id", 1)
-
-                    # Merge any explicit parameters with context from previous step
-                    step_params = step_data.get("parameters", {}) or {}
-                    merged_params = {**context, **step_params} if context else step_params
-                    # Store merged parameters back for potential later use
-                    step_data["parameters"] = merged_params
-
-                    auth_dict = task.get("authorization")
-                    if auth_dict and auth_dict.get("permission_status") == "granted":
-                        auth = AuthorizationDecision.from_dict(auth_dict)
-                    else:
-                        auth = self.permission_evaluator.evaluate(task_id, action_name, target)
-                        task["authorization"] = auth.to_dict()
-
-                    if auth.permission_status == "requires_approval":
-                        self.state_machine.transition(task, "requires_approval", auth.reason)
-                        self._persist_task(task_id)
-                        return task
-
-                    if auth.permission_status == "denied":
-                        self.state_machine.transition(task, "failed", auth.reason)
-                        task["error_code"] = "ERR_PERMISSION_DENIED"
-                        task["error_message"] = auth.reason
-                        task["completed_at"] = current_iso_timestamp()
-                        self._persist_task(task_id)
-                        return task
-
-                    # Mark running state
-                    self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
-                    task["started_at"] = task["started_at"] or current_iso_timestamp()
-
-                    # Build PlanStep with merged parameters
-            plan_step = PlanStep(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-                parameters=merged_params,
-            )
-                                # Build the PlanStep with merged parameters
-
-
-(
-                        step_id=step_id,
-                        action=action_name,
-                        target=target,
-                        depends_on=step_data.get("depends_on", []),
-                        expected_outcome=step_data.get("expected_outcome", ""),
-                        parameters=merged_params,
-                    )
-
-                    exec_result: ExecutionResult = self.adapter.execute_plan_step(
-                        step=plan_step,
-                        task_id=task_id,
-                        authorization=auth,
-                        timeout_seconds=timeout_seconds,
-                    )
-
-                    task["active_action_id"] = exec_result.action_id
-
-                    if exec_result.status == "completed":
-                        self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
-                        task["active_action_id"] = None
-                        task["result"] = exec_result.to_dict()
-                        task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
-                        task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
-                        task["duration_ms"] = exec_result.duration_ms
-                        task["completed_at"] = exec_result.completed_at
-                        task["message"] = f"Action '{action_name}' completed and verified successfully."
-                        self._persist_task(task_id)
-                        # Update context for next step from verification details if present
-                        if exec_result.verification and isinstance(exec_result.verification.details, dict):
-                            context = exec_result.verification.details
-                        else:
-                            context = {}
-                        continue
-
-                    elif exec_result.status == "cancelled":
-                        self.state_machine.transition(task, "cancelled", "Action was cancelled.")
-                        task["active_action_id"] = None
-                        task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
-                        task["error_message"] = exec_result.error_message or "Action was cancelled."
-                        task["completed_at"] = exec_result.completed_at
-                        self._persist_task(task_id)
-                        return task
-
-                    else:
-                        self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
-                        task["active_action_id"] = None
-                        task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
-                        task["error_message"] = exec_result.error_message or "Action execution failed."
-                        task["duration_ms"] = exec_result.duration_ms
-                        task["completed_at"] = exec_result.completed_at
-                        self._persist_task(task_id)
-                        return task
-
-                # All steps processed – ensure final persistence
-                self._persist_task(task_id)
-                return task
-        
-        context: Dict[str, Any] = {}
-        if not steps:
-            if current_status == "pending":
-                task["message"] = "No executable plan steps found for this task."
-                self._persist_task(task_id)
-            return task
-
-        for step_data in steps:
-            action_name = step_data.get("action", "")
-            target = step_data.get("target", "")
-            step_id = step_data.get("step_id", 1)
-
-            # Merge any existing parameters with context from previous step
-            step_params = step_data.get("parameters", {}) or {}
-            merged_params = {**context, **step_params} if context else step_params
-            # Store merged parameters back for potential use by adapter
-            step_data["parameters"] = merged_params
-
-            auth_dict = task.get("authorization")
-            if auth_dict and auth_dict.get("permission_status") == "granted":
-                auth = AuthorizationDecision.from_dict(auth_dict)
-            else:
-                auth = self.permission_evaluator.evaluate(task_id, action_name, target)
-                task["authorization"] = auth.to_dict()
-
-            if auth.permission_status == "requires_approval":
-                self.state_machine.transition(task, "requires_approval", auth.reason)
-                self._persist_task(task_id)
-                return task
-
-            if auth.permission_status == "denied":
-                self.state_machine.transition(task, "failed", auth.reason)
-                task["error_code"] = "ERR_PERMISSION_DENIED"
-                task["error_message"] = auth.reason
-                task["completed_at"] = current_iso_timestamp()
-                self._persist_task(task_id)
-                return task
-
-            self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
-            task["started_at"] = task["started_at"] or current_iso_timestamp()
-
-                                    # Build the PlanStep with merged parameters
-
-
-(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-                parameters=merged_params,
-            )(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-            )
-
-            exec_result: ExecutionResult = self.adapter.execute_plan_step(
-                step=plan_step,
-                task_id=task_id,
-                authorization=auth,
-                timeout_seconds=timeout_seconds,
-            )
-
-            task["active_action_id"] = exec_result.action_id
-
-            if exec_result.status == "completed":
-                self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
-                task["active_action_id"] = None
-                task["result"] = exec_result.to_dict()
-                task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
-                task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                task["message"] = f"Action '{action_name}' completed and verified successfully."
-                self._persist_task(task_id)
-                # Update context for next step from verification details if any
-                if exec_result.verification and isinstance(exec_result.verification.details, dict):
-                    context = exec_result.verification.details
-                else:
-                    context = {}
-                continue
-
-            elif exec_result.status == "cancelled":
-                self.state_machine.transition(task, "cancelled", "Action was cancelled.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
-                task["error_message"] = exec_result.error_message or "Action was cancelled."
-                task["completed_at"] = exec_result.completed_at
-                self._persist_task(task_id)
-                return task
-
-            else:
-                self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
-                task["error_message"] = exec_result.error_message or "Action execution failed."
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                self._persist_task(task_id)
-                return task
-
-        # All steps processed – ensure final persistence
-        self._persist_task(task_id)
-        return task
-            
-            context: Dict[str, Any] = {}
-        if not steps:
-            if current_status == "pending":
-                task["message"] = "No executable plan steps found for this task."
-                self._persist_task(task_id)
-            return task
-
-        for step_data in steps:
-            action_name = step_data.get("action", "")
-            target = step_data.get("target", "")
-            step_id = step_data.get("step_id", 1)
-
-            auth_dict = task.get("authorization")
-            if auth_dict and auth_dict.get("permission_status") == "granted":
-                auth = AuthorizationDecision.from_dict(auth_dict)
-            else:
-                auth = self.permission_evaluator.evaluate(task_id, action_name, target)
-                task["authorization"] = auth.to_dict()
-
-            if auth.permission_status == "requires_approval":
-                self.state_machine.transition(task, "requires_approval", auth.reason)
-                self._persist_task(task_id)
-                return task
-
-            if auth.permission_status == "denied":
-                self.state_machine.transition(task, "failed", auth.reason)
-                task["error_code"] = "ERR_PERMISSION_DENIED"
-                task["error_message"] = auth.reason
-                task["completed_at"] = current_iso_timestamp()
-                self._persist_task(task_id)
-                return task
-
-            self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
-            task["started_at"] = task["started_at"] or current_iso_timestamp()
-
-                                    # Build the PlanStep with merged parameters
-
-
-(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-                parameters=merged_params,
-            )(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-            )
-
-            exec_result: ExecutionResult = self.adapter.execute_plan_step(
-                step=plan_step,
-                task_id=task_id,
-                authorization=auth,
-                timeout_seconds=timeout_seconds,
-            )
-
-            task["active_action_id"] = exec_result.action_id
-
-            if exec_result.status == "completed":
-                self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
-                task["active_action_id"] = None
-                task["result"] = exec_result.to_dict()
-                task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
-                task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                task["message"] = f"Action '{action_name}' completed and verified successfully."
-                self._persist_task(task_id)
-                continue
-
-            elif exec_result.status == "cancelled":
-                self.state_machine.transition(task, "cancelled", "Action was cancelled.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
-                task["error_message"] = exec_result.error_message or "Action was cancelled."
-                task["completed_at"] = exec_result.completed_at
-                self._persist_task(task_id)
-                return task
-
-            else:
-                self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
-                task["error_message"] = exec_result.error_message or "Action execution failed."
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                self._persist_task(task_id)
-                return task
-
-        # All steps processed – ensure final persistence
-        self._persist_task(task_id)
-        return task
-        """Execute pending plan steps through policy evaluation, dispatch, and verification."""
-        task = self.tasks.get(task_id)
-        if not task:
-            raise KeyError(f"Task '{task_id}' not found.")
-
-        current_status = task["status"]
-
-        if current_status in self.state_machine.TERMINAL_STATES:
-            return task
-
-                # Retrieve and execute each plan step sequentially, passing context between steps
-        steps = task.get("steps", [])
-        # Context dict to pass data between steps (e.g., clipboard text)
-        context: Dict[str, Any] = {}
-        if not steps:
-            if current_status == "pending":
-                task["message"] = "No executable plan steps found for this task."
-                self._persist_task(task_id)
-            return task
-
-        for step_data in steps:
-            action_name = step_data.get("action", "")
-            target = step_data.get("target", "")
-            step_id = step_data.get("step_id", 1)
-
-            # Merge any explicit parameters with context from previous step
-            step_params = step_data.get("parameters", {}) or {}
-            merged_params = {**context, **step_params} if context else step_params
-            # Store merged parameters back for potential later use
-            step_data["parameters"] = merged_params
-
-            auth_dict = task.get("authorization")
-            if auth_dict and auth_dict.get("permission_status") == "granted":
-                auth = AuthorizationDecision.from_dict(auth_dict)
-            else:
-                auth = self.permission_evaluator.evaluate(task_id, action_name, target)
-                task["authorization"] = auth.to_dict()
-
-            if auth.permission_status == "requires_approval":
-                self.state_machine.transition(task, "requires_approval", auth.reason)
-                self._persist_task(task_id)
-                return task
-
-            if auth.permission_status == "denied":
-                self.state_machine.transition(task, "failed", auth.reason)
-                task["error_code"] = "ERR_PERMISSION_DENIED"
-                task["error_message"] = auth.reason
-                task["completed_at"] = current_iso_timestamp()
-                self._persist_task(task_id)
-                return task
-
-            # Mark running state
-            self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
-            task["started_at"] = task["started_at"] or current_iso_timestamp()
-
-            # Build PlanStep with merged parameters
-            plan_step = PlanStep(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-                parameters=merged_params,
-            )
-
-
-            try:
-                exec_result: ExecutionResult = self.adapter.execute_plan_step(
-                    step=plan_step,
-                    task_id=task_id,
-                    authorization=auth,
-                    timeout_seconds=timeout_seconds,
-                )
-            except Exception as exc:
-                self.state_machine.transition(task, "failed", f"Windows Automation execution failure: {str(exc)}")
-                task["active_action_id"] = None
-                task["error_code"] = "ERR_AUTOMATION_FAILURE"
-                task["error_message"] = str(exc)
-                task["completed_at"] = current_iso_timestamp()
-                self._persist_task(task_id)
-                return task
-
-            task["active_action_id"] = exec_result.action_id
-
-            if exec_result.status == "completed":
-                self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
-                task["active_action_id"] = None
-                task["result"] = exec_result.to_dict()
-                task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
-                task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                task["message"] = f"Action '{action_name}' completed and verified successfully."
-                self._persist_task(task_id)
-                # Update context for next step from verification details if present
-                if exec_result.verification and isinstance(exec_result.verification.details, dict):
-                    context = exec_result.verification.details
-                else:
-                    context = {}
-                continue
-
-            elif exec_result.status == "cancelled":
-                self.state_machine.transition(task, "cancelled", "Action was cancelled.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
-                task["error_message"] = exec_result.error_message or "Action was cancelled."
-                task["completed_at"] = exec_result.completed_at
-                self._persist_task(task_id)
-                return task
-
-            else:
-                self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
-                task["error_message"] = exec_result.error_message or "Action execution failed."
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                self._persist_task(task_id)
-                return task
-
-        # All steps processed – ensure final persistence
-        self._persist_task(task_id)
-        return task
-
-                 (e.g., clipboard text)
-                context: Dict[str, Any] = {}
-                if not steps:
-                    if current_status == "pending":
-                        task["message"] = "No executable plan steps found for this task."
-                        self._persist_task(task_id)
-                    return task
-
-                for step_data in steps:
-                    action_name = step_data.get("action", "")
-                    target = step_data.get("target", "")
-                    step_id = step_data.get("step_id", 1)
-
-                    # Merge any explicit parameters with context from previous step
-                    step_params = step_data.get("parameters", {}) or {}
-                    merged_params = {**context, **step_params} if context else step_params
-                    # Store merged parameters back for potential later use
-                    step_data["parameters"] = merged_params
-
-                    auth_dict = task.get("authorization")
-                    if auth_dict and auth_dict.get("permission_status") == "granted":
-                        auth = AuthorizationDecision.from_dict(auth_dict)
-                    else:
-                        auth = self.permission_evaluator.evaluate(task_id, action_name, target)
-                        task["authorization"] = auth.to_dict()
-
-                    if auth.permission_status == "requires_approval":
-                        self.state_machine.transition(task, "requires_approval", auth.reason)
-                        self._persist_task(task_id)
-                        return task
-
-                    if auth.permission_status == "denied":
-                        self.state_machine.transition(task, "failed", auth.reason)
-                        task["error_code"] = "ERR_PERMISSION_DENIED"
-                        task["error_message"] = auth.reason
-                        task["completed_at"] = current_iso_timestamp()
-                        self._persist_task(task_id)
-                        return task
-
-                    # Mark running state
-                    self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
-                    task["started_at"] = task["started_at"] or current_iso_timestamp()
-
-                    # Build PlanStep with merged parameters
-            plan_step = PlanStep(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-                parameters=merged_params,
-            )
-                                # Build the PlanStep with merged parameters
-
-
-(
-                        step_id=step_id,
-                        action=action_name,
-                        target=target,
-                        depends_on=step_data.get("depends_on", []),
-                        expected_outcome=step_data.get("expected_outcome", ""),
-                        parameters=merged_params,
-                    )
-
-                    exec_result: ExecutionResult = self.adapter.execute_plan_step(
-                        step=plan_step,
-                        task_id=task_id,
-                        authorization=auth,
-                        timeout_seconds=timeout_seconds,
-                    )
-
-                    task["active_action_id"] = exec_result.action_id
-
-                    if exec_result.status == "completed":
-                        self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
-                        task["active_action_id"] = None
-                        task["result"] = exec_result.to_dict()
-                        task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
-                        task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
-                        task["duration_ms"] = exec_result.duration_ms
-                        task["completed_at"] = exec_result.completed_at
-                        task["message"] = f"Action '{action_name}' completed and verified successfully."
-                        self._persist_task(task_id)
-                        # Update context for next step from verification details if present
-                        if exec_result.verification and isinstance(exec_result.verification.details, dict):
-                            context = exec_result.verification.details
-                        else:
-                            context = {}
-                        continue
-
-                    elif exec_result.status == "cancelled":
-                        self.state_machine.transition(task, "cancelled", "Action was cancelled.")
-                        task["active_action_id"] = None
-                        task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
-                        task["error_message"] = exec_result.error_message or "Action was cancelled."
-                        task["completed_at"] = exec_result.completed_at
-                        self._persist_task(task_id)
-                        return task
-
-                    else:
-                        self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
-                        task["active_action_id"] = None
-                        task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
-                        task["error_message"] = exec_result.error_message or "Action execution failed."
-                        task["duration_ms"] = exec_result.duration_ms
-                        task["completed_at"] = exec_result.completed_at
-                        self._persist_task(task_id)
-                        return task
-
-                # All steps processed – ensure final persistence
-                self._persist_task(task_id)
-                return task
-        
-        context: Dict[str, Any] = {}
-        if not steps:
-            if current_status == "pending":
-                task["message"] = "No executable plan steps found for this task."
-                self._persist_task(task_id)
-            return task
-
-        for step_data in steps:
-            action_name = step_data.get("action", "")
-            target = step_data.get("target", "")
-            step_id = step_data.get("step_id", 1)
-
-            # Merge any existing parameters with context from previous step
-            step_params = step_data.get("parameters", {}) or {}
-            merged_params = {**context, **step_params} if context else step_params
-            # Store merged parameters back for potential use by adapter
-            step_data["parameters"] = merged_params
-
-            auth_dict = task.get("authorization")
-            if auth_dict and auth_dict.get("permission_status") == "granted":
-                auth = AuthorizationDecision.from_dict(auth_dict)
-            else:
-                auth = self.permission_evaluator.evaluate(task_id, action_name, target)
-                task["authorization"] = auth.to_dict()
-
-            if auth.permission_status == "requires_approval":
-                self.state_machine.transition(task, "requires_approval", auth.reason)
-                self._persist_task(task_id)
-                return task
-
-            if auth.permission_status == "denied":
-                self.state_machine.transition(task, "failed", auth.reason)
-                task["error_code"] = "ERR_PERMISSION_DENIED"
-                task["error_message"] = auth.reason
-                task["completed_at"] = current_iso_timestamp()
-                self._persist_task(task_id)
-                return task
-
-            self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
-            task["started_at"] = task["started_at"] or current_iso_timestamp()
-
-                                    # Build the PlanStep with merged parameters
-
-
-(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-                parameters=merged_params,
-            )(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-            )
-
-            exec_result: ExecutionResult = self.adapter.execute_plan_step(
-                step=plan_step,
-                task_id=task_id,
-                authorization=auth,
-                timeout_seconds=timeout_seconds,
-            )
-
-            task["active_action_id"] = exec_result.action_id
-
-            if exec_result.status == "completed":
-                self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
-                task["active_action_id"] = None
-                task["result"] = exec_result.to_dict()
-                task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
-                task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                task["message"] = f"Action '{action_name}' completed and verified successfully."
-                self._persist_task(task_id)
-                # Update context for next step from verification details if any
-                if exec_result.verification and isinstance(exec_result.verification.details, dict):
-                    context = exec_result.verification.details
-                else:
-                    context = {}
-                continue
-
-            elif exec_result.status == "cancelled":
-                self.state_machine.transition(task, "cancelled", "Action was cancelled.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
-                task["error_message"] = exec_result.error_message or "Action was cancelled."
-                task["completed_at"] = exec_result.completed_at
-                self._persist_task(task_id)
-                return task
-
-            else:
-                self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
-                task["error_message"] = exec_result.error_message or "Action execution failed."
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                self._persist_task(task_id)
-                return task
-
-        # All steps processed – ensure final persistence
-        self._persist_task(task_id)
-        return task
-            
-            context: Dict[str, Any] = {}
-        if not steps:
-            if current_status == "pending":
-                task["message"] = "No executable plan steps found for this task."
-            return task
-
-        for step_data in steps:
-            action_name = step_data.get("action", "")
-            target = step_data.get("target", "")
-            step_id = step_data.get("step_id", 1)
-
-            auth_dict = task.get("authorization")
-            if auth_dict and auth_dict.get("permission_status") == "granted":
-                auth = AuthorizationDecision.from_dict(auth_dict)
-            else:
-                auth = self.permission_evaluator.evaluate(task_id, action_name, target)
-                task["authorization"] = auth.to_dict()
-
-            if auth.permission_status == "requires_approval":
-                self.state_machine.transition(task, "requires_approval", auth.reason)
-                return task
-
-            if auth.permission_status == "denied":
-                self.state_machine.transition(task, "failed", auth.reason)
-                task["error_code"] = "ERR_PERMISSION_DENIED"
-                task["error_message"] = auth.reason
-                task["completed_at"] = current_iso_timestamp()
-                return task
-
-            self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
-            task["started_at"] = task["started_at"] or current_iso_timestamp()
-
-                                    # Build the PlanStep with merged parameters
-
-
-(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-                parameters=merged_params,
-            )(
-                step_id=step_id,
-                action=action_name,
-                target=target,
-                depends_on=step_data.get("depends_on", []),
-                expected_outcome=step_data.get("expected_outcome", ""),
-            )
-
-            exec_result: ExecutionResult = self.adapter.execute_plan_step(
-                step=plan_step,
-                task_id=task_id,
-                authorization=auth,
-                timeout_seconds=timeout_seconds,
-            )
-
-            task["active_action_id"] = exec_result.action_id
-
-            if exec_result.status == "completed":
-                self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
-                task["active_action_id"] = None
-                task["result"] = exec_result.to_dict()
-                task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
-                task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                task["message"] = f"Action '{action_name}' completed and verified successfully."
-
-            elif exec_result.status == "cancelled":
-                self.state_machine.transition(task, "cancelled", "Action was cancelled.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_CANCELLED"
-                task["error_message"] = exec_result.error_message or "Action was cancelled."
-                task["completed_at"] = exec_result.completed_at
-                return task
-
-            else:
-                self.state_machine.transition(task, "failed", exec_result.error_message or "Execution failed.")
-                task["active_action_id"] = None
-                task["error_code"] = exec_result.error_code or "ERR_EXECUTION_FAILED"
-                task["error_message"] = exec_result.error_message or "Action execution failed."
-                task["duration_ms"] = exec_result.duration_ms
-                task["completed_at"] = exec_result.completed_at
-                return task
-
         return task
 
     def approve_task(

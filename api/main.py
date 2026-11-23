@@ -75,7 +75,7 @@ def get_browser_profiles_endpoint():
     """Return discovered Chrome browser profiles.
     """
     try:
-        from api.browser_profiles import get_browser_profiles
+        from windows_automation.browser_profiles import get_browser_profiles
         profiles = get_browser_profiles("chrome")
         return profiles
     except Exception as exc:
@@ -241,7 +241,7 @@ def get_browser_profiles_endpoint():
     """Return discovered Chrome browser profiles.
     """
     try:
-        from api.browser_profiles import get_browser_profiles
+        from windows_automation.browser_profiles import get_browser_profiles
         profiles = get_browser_profiles("chrome")
         return profiles
     except Exception as exc:
