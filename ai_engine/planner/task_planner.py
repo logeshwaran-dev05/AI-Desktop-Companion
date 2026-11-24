@@ -1,677 +1,461 @@
+
 import re
 from difflib import SequenceMatcher
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Literal
 
 from ai_engine.schemas.command_schema import (
     CommandRequest,
     CommandEntities,
     PlanStep,
-    PlannerResponse
+    PlannerResponse,
+    PlanStatus,
 )
 
-from ai_engine.catalogue import get_installed_apps
-from ai_engine.nlp.entity_extractor import EntityExtractor
+from windows_automation.adapter import WindowsAutomationAdapter
+from windows_automation.catalogue import ApplicationRecord
+
+
+ResolutionStatus = Literal[
+    "resolved",
+    "clarification_required",
+    "unsupported",
+]
 
 
 class TaskPlanner:
+    """
+    Converts natural-language application commands into structured plans.
 
-    def __init__(self):
-        self.entity_extractor = EntityExtractor()
+    Application discovery and validation are delegated to
+    WindowsAutomationAdapter.
+    """
+
+    _default_adapter: Optional[WindowsAutomationAdapter] = None
+
+    COMMAND_PATTERN = re.compile(
+        r"^(?:please\s+)?"
+        r"(?:(?:can|could)\s+you\s+)?"
+        r"(?:open|launch|start|run|bring\s+up)\s+(.+?)\s*[?.!]*$",
+        re.IGNORECASE,
+    )
+
+    NATURAL_LANGUAGE_PATTERN = re.compile(
+        r"^(?:"
+        r"i\s+want\s+to\s+(?:use|open)|"
+        r"i\s+need\s+to\s+(?:use|open)|"
+        r"i\s+would\s+like\s+to\s+(?:use|open)"
+        r")\s+(.+?)\s*[?.!]*$",
+        re.IGNORECASE,
+    )
+
+    GENERAL_QUESTION_PATTERN = re.compile(
+        r"^(what|why|how|when|where|who|which|explain|define)\b",
+        re.IGNORECASE,
+    )
+
+    def __init__(
+        self,
+        adapter: Optional[WindowsAutomationAdapter] = None,
+    ):
+        if adapter is not None:
+            self.adapter = adapter
+        else:
+            if TaskPlanner._default_adapter is None:
+                TaskPlanner._default_adapter = (
+                    WindowsAutomationAdapter(auto_discover=True)
+                )
+
+            self.adapter = TaskPlanner._default_adapter
+
+    # ---------------------------------------------------------
+    # NORMALIZATION
+    # ---------------------------------------------------------
 
     @staticmethod
     def normalize(value: str) -> str:
-        """Normalize names for application matching."""
-        return re.sub(r"\s+", "", (value or "").lower().strip())
+        """Normalize application names for comparison."""
 
-    def _match_application(
+        return re.sub(
+            r"[^a-z0-9]",
+            "",
+            (value or "").casefold(),
+        )
+
+    # ---------------------------------------------------------
+    # RESPONSE CREATION
+    # ---------------------------------------------------------
+
+    def _response(
         self,
-        name: str,
-        installed_apps: List[Dict[str, Any]]
-    ) -> Tuple[Optional[Dict[str, Any]], float, List[Dict[str, Any]]]:
-        """Match an application name or alias against the installed apps catalogue."""
-        requested_name = self.normalize(name)
-        if not requested_name:
+        intent: str,
+        status: PlanStatus,
+        message: str,
+        application: Optional[str] = None,
+        steps: Optional[list[PlanStep]] = None,
+        clarification_question: Optional[str] = None,
+        parameters: Optional[dict] = None,
+    ) -> PlannerResponse:
+        """Create a consistent planner response."""
+
+        return PlannerResponse(
+            intent=intent,
+            entities=CommandEntities(
+                application=application,
+                parameters=parameters or {},
+            ),
+            steps=steps or [],
+            requires_clarification=(
+                status == "clarification_required"
+            ),
+            clarification_question=clarification_question,
+            status=status,
+            message=message,
+        )
+
+    # ---------------------------------------------------------
+    # COMMAND EXTRACTION
+    # ---------------------------------------------------------
+
+    def _extract_target(self, text: str) -> Optional[str]:
+        """Extract the requested application from a command."""
+
+        cleaned = " ".join((text or "").strip().split())
+
+        match = self.COMMAND_PATTERN.match(cleaned)
+
+        if match:
+            return match.group(1).strip(" .?!")
+
+        match = self.NATURAL_LANGUAGE_PATTERN.match(cleaned)
+
+        if match:
+            return match.group(1).strip(" .?!")
+
+        # Handle a command containing only an action.
+        if re.match(
+            r"^(?:please\s+)?(?:open|launch|start|run)\s*[?.!]*$",
+            cleaned,
+            re.IGNORECASE,
+        ):
+            return ""
+
+        return None
+
+    # ---------------------------------------------------------
+    # FUZZY APPLICATION MATCHING
+    # ---------------------------------------------------------
+
+    def _find_fuzzy_match(
+        self,
+        query: str,
+    ) -> tuple[
+        Optional[ApplicationRecord],
+        float,
+        list[ApplicationRecord],
+    ]:
+        """
+        Find likely spelling corrections using dynamically
+        discovered application records.
+
+        Reject candidates whose name lengths differ too much,
+        preventing unrelated applications from being suggested.
+        """
+
+        normalized_query = self.normalize(query)
+
+        if not normalized_query:
             return None, 0.0, []
 
-    def _match_application(self, application, installed_apps):
-        """Find the best matching installed application."""
+        records = self.adapter.get_catalogue().get_all()
 
-        requested_name = self.normalize(application)
-        matches = []
+        scored: list[tuple[float, ApplicationRecord]] = []
 
-        matches = []
-        for app in installed_apps:
+        for record in records:
             candidates = [
-                app["app_name"],
-                app["app_id"],
-                *app.get("aliases", [])
+                record.display_name,
+                record.app_id,
+                *(record.aliases or []),
             ]
 
-            scores = [
-                SequenceMatcher(
+            best_score = 0.0
+
+            for candidate_name in candidates:
+                if not isinstance(candidate_name, str):
+                    continue
+
+                normalized_candidate = self.normalize(
+                    candidate_name
+                )
+
+                if not normalized_candidate:
+                    continue
+
+                length_difference = abs(
+                    len(normalized_query)
+                    - len(normalized_candidate)
+                )
+
+                allowed_difference = max(
+                    2,
+                    round(len(normalized_query) * 0.20),
+                )
+
+                if length_difference > allowed_difference:
+                    continue
+
+                score = SequenceMatcher(
                     None,
-                    requested_name,
-                    self.normalize(candidate)
+                    normalized_query,
+                    normalized_candidate,
                 ).ratio()
-                for candidate in candidates
+
+                best_score = max(best_score, score)
+
+            if best_score > 0:
+                scored.append((best_score, record))
+
+        if not scored:
+            return None, 0.0, []
+
+        scored.sort(
+            key=lambda item: item[0],
+            reverse=True,
+        )
+
+        best_score = scored[0][0]
+
+        possible_matches = [
+            record
+            for score, record in scored
+            if score >= 0.78
+        ]
+
+        # Avoid automatically choosing between similarly scored apps.
+        if (
+            len(scored) > 1
+            and best_score - scored[1][0] < 0.06
+        ):
+            return None, best_score, possible_matches
+
+        return scored[0][1], best_score, possible_matches
+
+    # ---------------------------------------------------------
+    # APPLICATION RESOLUTION
+    # ---------------------------------------------------------
+
+    def _resolve_application(
+        self,
+        query: str,
+    ) -> tuple[
+        ResolutionStatus,
+        Optional[ApplicationRecord],
+        Optional[str],
+    ]:
+        """
+        Resolve an application through Windows Automation.
+
+        Exact matches are accepted.
+        Partial names require clarification.
+        Typographical corrections are validated dynamically.
+        """
+
+        resolution = self.adapter.resolve_application(query)
+
+        if resolution.status == "resolved":
+            record = resolution.matched_record
+
+            if record is None:
+                return "unsupported", None, None
+
+            normalized_query = self.normalize(query)
+            normalized_name = self.normalize(
+                record.display_name
+            )
+
+            normalized_aliases = {
+                self.normalize(alias)
+                for alias in (record.aliases or [])
+                if alias
+            }
+
+            is_exact = (
+                normalized_query == normalized_name
+                or normalized_query == self.normalize(record.app_id)
+                or normalized_query in normalized_aliases
+            )
+
+            if is_exact:
+                return "resolved", record, None
+
+            is_prefix = (
+                normalized_name.startswith(normalized_query)
+                or any(
+                    alias.startswith(normalized_query)
+                    for alias in normalized_aliases
+                )
+            )
+
+            if is_prefix:
+                return (
+                    "clarification_required",
+                    record,
+                    f"Did you mean {record.display_name}?",
+                )
+
+            return "unsupported", None, None
+
+        if resolution.status == "ambiguous":
+            names = [
+                record.display_name
+                for record in resolution.candidates[:5]
             ]
 
-            confidence = max(scores)
+            return (
+                "clarification_required",
+                None,
+                "Which application did you mean? "
+                + ", ".join(names),
+            )
 
-            if any(
-                requested_name == self.normalize(candidate)
-                for candidate in candidates
+        # Try spelling correction when there is no direct match.
+        candidate, confidence, possible_matches = (
+            self._find_fuzzy_match(query)
+        )
+
+        if candidate is not None and confidence >= 0.86:
+            verified = self.adapter.resolve_application(
+                candidate.display_name
+            )
+
+            if (
+                verified.status == "resolved"
+                and verified.matched_record is not None
             ):
-                confidence = 1.0
+                return (
+                    "resolved",
+                    verified.matched_record,
+                    None,
+                )
 
-            matches.append({
-                "app": app,
-                "confidence": confidence
-            })
+        # Ask for confirmation only when a sufficiently close
+        # candidate has been found.
+        if confidence >= 0.78 and possible_matches:
+            names = [
+                record.display_name
+                for record in possible_matches[:3]
+            ]
 
-        matches.sort(
-            key=lambda item: item["confidence"],
-            reverse=True
+            return (
+                "clarification_required",
+                None,
+                "Did you mean one of these applications? "
+                + ", ".join(names),
+            )
+
+        return "unsupported", None, None
+
+    # ---------------------------------------------------------
+    # MAIN COMMAND PROCESSING
+    # ---------------------------------------------------------
+
+    def process_command(
+        self,
+        request: CommandRequest,
+    ) -> PlannerResponse:
+        """Understand a command and generate a structured plan."""
+
+        text = " ".join(
+            (request.text or "").strip().split()
         )
 
-        return matches
-
-    def _build_media_plan(self, user_input, entities):
-        """
-        Build an ordered plan for YouTube and ChatGPT commands.
-
-        These steps describe intended actions. The execution layer
-        must support the corresponding action names.
-        """
-
-        application = entities.get("application")
-        search_query = entities.get("search_query")
-        prompt = entities.get("prompt")
-        video_index = entities.get("video_index")
-        profile_name = entities.get("profile_name")
-        profile_directory = entities.get("profile_directory")
-
-        steps = []
-        parameters = {}
-
-        if profile_name:
-            parameters["profile_name"] = profile_name
-
-        if profile_directory:
-            parameters["profile_directory"] = profile_directory
-
-        # Step 1: Open the requested website.
-
-        if application == "youtube":
-            steps.append(
-                PlanStep(
-                    step_id=1,
-                    action="open_website",
-                    target="YouTube",
-                    depends_on=[],
-                    expected_outcome="YouTube should open successfully."
-                )
-            )
-
-        elif application == "chatgpt":
-            steps.append(
-                PlanStep(
-                    step_id=1,
-                    action="open_website",
-                    target="ChatGPT",
-                    depends_on=[],
-                    expected_outcome="ChatGPT should open successfully."
-                )
-            )
-
-        # Step 2: Search on YouTube.
-
-        if application == "youtube" and search_query:
-
-            parameters["search_query"] = search_query
-
-            steps.append(
-                PlanStep(
-                    step_id=len(steps) + 1,
-                    action="search",
-                    target=search_query,
-                    depends_on=[steps[-1].step_id],
-                    expected_outcome=(
-                        f"Search results for '{search_query}' "
-                        "should be displayed."
-                    )
-                )
-            )
-
-        # Step 3: Play the requested video.
-
-        play_requested = bool(
-            re.search(
-                r"\b(play|select|click|watch)\b",
-                user_input,
-                re.IGNORECASE
-            )
-        )
-
-        if application == "youtube" and play_requested:
-
-            if video_index is None:
-                return None, None, (
-                    "Which video would you like to play?"
-                )
-
-            parameters["video_index"] = video_index
-
-            steps.append(
-                PlanStep(
-                    step_id=len(steps) + 1,
-                    action="play_video",
-                    target=str(video_index),
-                    depends_on=[steps[-1].step_id],
-                    expected_outcome=(
-                        f"Video number {video_index + 1} "
-                        "should start playing."
-                    )
-                )
-            )
-
-        # Step 4: Ask ChatGPT a prompt.
-
-        if application == "chatgpt" and prompt:
-
-            parameters["prompt"] = prompt
-
-            steps.append(
-                PlanStep(
-                    step_id=len(steps) + 1,
-                    action="ask_prompt",
-                    target=prompt,
-                    depends_on=[steps[-1].step_id],
-                    expected_outcome=(
-                        "ChatGPT should receive and respond "
-                        "to the requested prompt."
-                    )
-                )
-            )
-
-        if len(steps) <= 1:
-            return None, None, None
-
-        return steps, parameters, None
-
-    def process_command(self, request: CommandRequest) -> PlannerResponse:
-
-        # Step 1: Normalize input.
-
-        original_input = " ".join(request.text.split())
-        user_input = original_input.lower()
-
-        # Step 2: Handle empty input.
-
-            confidence = max(scores)
-
-            # Exact name, ID or alias match
-            if any(
-                requested_name == self.normalize(candidate)
-                for candidate in candidates
-            ):
-                confidence = 1.0
-
-            matches.append({
-                "app": app,
-                "confidence": confidence
-            })
-
-        matches.sort(
-            key=lambda item: item["confidence"],
-            reverse=True
-        )
-
-        best_match = matches[0] if matches else None
-        best_confidence = best_match["confidence"] if best_match else 0.0
-        possible_matches = [
-            item for item in matches
-            if item["confidence"] >= 0.70
-        ]
-
-        return best_match, best_confidence, possible_matches
-
-    def process_command(self, request: CommandRequest) -> PlannerResponse:
-        # Step 1: Normalize input
-        raw_text = (request.text or "").strip()
-        user_input = " ".join(raw_text.split()).lower()
-
-        if not user_input:
-            return PlannerResponse(
+        # 1. Empty input.
+        if not text:
+            return self._response(
                 intent="unknown",
-                entities=CommandEntities(),
-                steps=[],
-                requires_clarification=True,
-                clarification_question="Please enter a command.",
                 status="clarification_required",
-                message="Command cannot be empty."
-            )
-
-        # Step 3: Handle general questions.
-
-        question_words = (
-            "what ", "why ", "how ",
-            "when ", "where ", "who "
-        )
-
-        # Avoid intercepting search commands like "search who is ... on google"
-        is_explicit_search = bool(
-            re.match(r"^(?:(?:please|can you|could you|would you)\s+)?(?:search|find|look up|play|stream|google)\b", user_input)
-        )
-
-        if not is_explicit_search and user_input.startswith(question_words):
-            return PlannerResponse(
-                intent="general_question",
-                entities=CommandEntities(),
-                steps=[],
-                requires_clarification=False,
-                clarification_question=None,
-                status="plan_ready",
-                message="General question identified."
-            )
-
-        # Step 4: Extract entities.
-
-        extracted = self.entity_extractor.extract_entities(
-            original_input
-        )
-
-        application = extracted.get("application")
-
-        # Step 5: Handle YouTube and ChatGPT multi-step commands.
-
-        if application in ("youtube", "chatgpt"):
-
-            media_result = self._build_media_plan(
-                user_input,
-                extracted
-            )
-
-            steps, parameters, clarification = media_result
-
-            if clarification:
-                return PlannerResponse(
-                    intent="multi_step",
-                    entities=CommandEntities(
-                        application=application,
-                        parameters=extracted
-                    ),
-                    steps=[],
-                    requires_clarification=True,
-                    clarification_question=clarification,
-                    status="clarification_required",
-                    message="More information is required."
-                )
-
-            if steps:
-                return PlannerResponse(
-                    intent="multi_step",
-                    entities=CommandEntities(
-                        application=application,
-                        parameters=parameters
-                    ),
-                    steps=steps,
-                    requires_clarification=False,
-                    clarification_question=None,
-                    status="plan_ready",
-                    message=(
-                        f"Created an ordered plan with "
-                        f"{len(steps)} steps."
-                    )
-                )
-
-        # Step 6: Identify natural language application commands.
-
-        pattern = (
-        installed_apps = get_installed_apps()
-
-        # Step 4: Handle search and playback commands (search_web_app)
-        # Check for incomplete / missing search queries first
-        missing_query_patterns = [
-            r"^(?:(?:please|can you|could you|would you)\s+)?(?:search(?:\s+for)?|find|look up)\s+(?:on|in)\s*(.*)$",
-            r"^(?:(?:please|can you|could you|would you)\s+)?(?:play|stream|listen to)\s+(?:on|in)\s*(.*)$",
-            r"^(?:(?:please|can you|could you|would you)\s+)?(?:search(?:\s+for)?|find|look up)$",
-            r"^(?:(?:please|can you|could you|would you)\s+)?(?:play|stream|listen to)$",
-        ]
-
-        for mq_pat in missing_query_patterns:
-            mq_match = re.match(mq_pat, user_input)
-            if mq_match:
-                is_play = "play" in user_input or "stream" in user_input or "listen" in user_input
-                action_word = "play" if is_play else "search for"
-                return PlannerResponse(
-                    intent="search_web_app",
-                    entities=CommandEntities(),
-                    steps=[],
-                    requires_clarification=True,
-                    clarification_question=f"What would you like to {action_word}?",
-                    status="clarification_required",
-                    message="Search query is missing."
-                )
-
-        # Targeted play / search patterns with query and service:
-        # e.g. "play believer on youtube", "search python tutorials on google"
-        search_match = None
-        extracted_query = ""
-        extracted_target = ""
-
-        # Pattern A: play <query> on/in <service>
-        pat_a = re.match(
-            r"^(?:(?:please|can you|could you|would you)\s+)?"
-            r"(?:play|stream|listen to)\s+(.+?)\s+(?:on|in)\s+(.+)$",
-            user_input
-        )
-        # Pattern B: search (for) <query> on/in <service>
-        pat_b = re.match(
-            r"^(?:(?:please|can you|could you|would you)\s+)?"
-            r"(?:search(?:\s+for)?|find|look up)\s+(.+?)\s+(?:on|in)\s+(.+)$",
-            user_input
-        )
-        # Pattern C: open <service> and/then play <query>
-        pat_c = re.match(
-            r"^(?:(?:please|can you|could you|would you)\s+)?"
-            r"(?:open|launch|start|go to)\s+(.+?)\s+(?:and|then)\s+(?:play|stream|listen to)\s+(.+)$",
-            user_input
-        )
-        # Pattern D: open <service> and/then search (for) <query>
-        pat_d = re.match(
-            r"^(?:(?:please|can you|could you|would you)\s+)?"
-            r"(?:open|launch|start|go to)\s+(.+?)\s+(?:and|then)\s+(?:search(?:\s+for)?|find|look up)\s+(.+)$",
-            user_input
-        )
-        # Pattern E: google <query>
-        pat_e = re.match(
-            r"^(?:(?:please|can you|could you|would you)\s+)?google\s+(.+)$",
-            user_input
-        )
-        # Pattern F: generic play <query> -> default to youtube
-        pat_f = re.match(
-            r"^(?:(?:please|can you|could you|would you)\s+)?(?:play|stream|listen to)\s+(.+)$",
-            user_input
-        )
-        # Pattern G: generic search <query> -> default to google
-        pat_g = re.match(
-            r"^(?:(?:please|can you|could you|would you)\s+)?search(?:\s+for)?\s+(.+)$",
-            user_input
-        )
-
-        if pat_a:
-            extracted_query = pat_a.group(1).strip()
-            extracted_target = pat_a.group(2).strip()
-            search_match = True
-        elif pat_b:
-            extracted_query = pat_b.group(1).strip()
-            extracted_target = pat_b.group(2).strip()
-            search_match = True
-        elif pat_c:
-            extracted_target = pat_c.group(1).strip()
-            extracted_query = pat_c.group(2).strip()
-            search_match = True
-        elif pat_d:
-            extracted_target = pat_d.group(1).strip()
-            extracted_query = pat_d.group(2).strip()
-            search_match = True
-        elif pat_e:
-            extracted_query = pat_e.group(1).strip()
-            extracted_target = "google"
-            search_match = True
-        elif pat_f:
-            extracted_query = pat_f.group(1).strip()
-            extracted_target = "youtube"
-            search_match = True
-        elif pat_g:
-            extracted_query = pat_g.group(1).strip()
-            extracted_target = "google"
-            search_match = True
-
-        if search_match:
-            # Clean up query
-            clean_query = extracted_query.rstrip("?.!,")
-            if not clean_query:
-                return PlannerResponse(
-                    intent="search_web_app",
-                    entities=CommandEntities(),
-                    steps=[],
-                    requires_clarification=True,
-                    clarification_question="What would you like to search for?",
-                    status="clarification_required",
-                    message="Search query is missing."
-                )
-
-            # Match target against catalogue
-            best_match, best_confidence, _ = self._match_application(extracted_target, installed_apps)
-
-            if not best_match or best_confidence < 0.70:
-                return PlannerResponse(
-                    intent="search_web_app",
-                    entities=CommandEntities(
-                        application=extracted_target,
-                        parameters={"query": clean_query}
-                    ),
-                    steps=[],
-                    requires_clarification=False,
-                    clarification_question=None,
-                    status="unsupported",
-                    message=f"{extracted_target} is not currently available."
-                )
-
-            selected_app = best_match["app"]
-            app_name = selected_app["app_name"]
-            app_id = selected_app["app_id"]
-
-            return PlannerResponse(
-                intent="search_web_app",
-                entities=CommandEntities(
-                    application=app_name,
-                    parameters={"query": clean_query}
+                message="No command was provided.",
+                clarification_question=(
+                    "What would you like me to do?"
                 ),
-                steps=[
-                    PlanStep(
-                        step_id=1,
-                        action="search_web_app",
-                        target=app_id,
-                        depends_on=[],
-                        expected_outcome=f"Search for '{clean_query}' on {app_name}.",
-                        parameters={"query": clean_query}
-                    )
-                ],
-                requires_clarification=False,
-                clarification_question=None,
+            )
+
+        # 2. General questions.
+        if self.GENERAL_QUESTION_PATTERN.match(text):
+            return self._response(
+                intent="general_question",
                 status="plan_ready",
-                message=f"Search for '{clean_query}' on {app_name} ready."
+                message="This is a general question.",
             )
 
-        # Step 5: Identify natural language application open commands
-        open_pattern = (
-            r"^(?:(?:please|can you|could you|would you)\s+)?"
-            r"(?:(open|launch|start|run|bring up)\b\s*|"
-            r"(?:i want to use|i need to use|"
-            r"i would like to use|i would like|"
-            r"i want|i need)\s+)"
-            r"(.*)$"
-        )
+        # 3. Extract the requested application.
+        target = self._extract_target(text)
 
-        match = re.match(pattern, user_input)
-        match = re.match(open_pattern, user_input)
-
-        if not match:
-            return PlannerResponse(
+        if target is None:
+            return self._response(
                 intent="unknown",
-                entities=CommandEntities(),
-                steps=[],
-                requires_clarification=False,
-                clarification_question=None,
                 status="unsupported",
-                message="This command is not currently supported."
+                message=(
+                    "I could not identify a supported command."
+                ),
             )
 
-        application = match.group(2).strip().rstrip("?.!,")
-
-        # Step 7: Handle missing application name.
-
-        # Step 6: Handle missing application name
-        if not application:
-            return PlannerResponse(
+        # 4. Missing application.
+        if not target:
+            return self._response(
                 intent="open_application",
-                entities=CommandEntities(),
-                steps=[],
-                requires_clarification=True,
+                status="clarification_required",
+                message="The application name is missing.",
                 clarification_question=(
                     "Which application would you like to open?"
                 ),
-                status="clarification_required",
-                message="Application name is missing."
             )
 
-        # Step 8: Get installed application catalogue.
-
-        installed_apps = get_installed_apps()
-
-        if not installed_apps:
-            return PlannerResponse(
-                intent="open_application",
-                entities=CommandEntities(application=application),
-                steps=[],
-                requires_clarification=False,
-                clarification_question=None,
-                status="unsupported",
-                message="No installed applications are available."
-            )
-
-        # Step 9: Match application names, IDs and aliases.
-
-        matches = self._match_application(
-            application,
-            installed_apps
+        # 5. Resolve application dynamically.
+        status, record, question = (
+            self._resolve_application(target)
         )
 
-        if not matches:
-            return PlannerResponse(
+        if status == "clarification_required":
+            return self._response(
                 intent="open_application",
-                entities=CommandEntities(application=application),
-                steps=[],
-                requires_clarification=False,
-                clarification_question=None,
-                status="unsupported",
-                message="No matching application was found."
-            )
-
-        best_match = matches[0]
-        best_confidence = best_match["confidence"]
-        # Step 7: Match application against catalogue
-        best_match, best_confidence, possible_matches = self._match_application(application, installed_apps)
-
-        if not best_match:
-            return PlannerResponse(
-                intent="open_application",
-                entities=CommandEntities(application=application),
-                steps=[],
-                requires_clarification=False,
-                clarification_question=None,
-                status="unsupported",
-                message=f"{application} is not currently available."
-            )
-
-        # Step 10: Detect genuinely close matches.
-
-        # Step 8: Detect genuinely close ambiguous matches
-        if (
-            len(possible_matches) > 1
-            and possible_matches[1]["confidence"]
-            >= best_confidence - 0.10
-        ):
-            app_names = [
-                item["app"]["app_name"]
-                for item in possible_matches
-                if item["confidence"] >= best_confidence - 0.10
-            ]
-
-            return PlannerResponse(
-                intent="open_application",
-                entities=CommandEntities(
-                    application=application
-                ),
-                steps=[],
-                requires_clarification=True,
-                clarification_question=(
-                    "Which application did you mean: "
-                    + " or ".join(app_names) + "?"
-                ),
                 status="clarification_required",
-                message="Multiple application matches found."
-            )
-
-        # Step 11: Accept high-confidence match.
-
-        # Step 9: Accept high-confidence match
-        if best_confidence >= 0.85:
-
-            selected_app = best_match["app"]
-            application_name = selected_app["app_name"]
-            app_id = selected_app["app_id"]
-
-            # Use app_id for standard benchmark targets (chrome, spotify, youtube, google),
-            # and application_name for standard Windows built-ins (Notepad, Calculator, Paint)
-            step_target = app_id if app_id in ("chrome", "spotify", "youtube", "google") else application_name
-
-            return PlannerResponse(
-                intent="open_application",
-                entities=CommandEntities(
-                    application=application_name
-                ),
-                steps=[
-                    PlanStep(
-                        step_id=1,
-                        action="open_application",
-                        target=step_target,
-                        depends_on=[],
-                        expected_outcome=(
-                            f"{application_name} should open successfully."
-                        )
-                    )
-                ],
-                requires_clarification=False,
-                clarification_question=None,
-                status="plan_ready",
                 message=(
-                    f"{application_name} matched successfully."
-                )
-            )
-
-        # Step 12: Ask clarification for medium confidence.
-
-        if best_confidence >= 0.65:
-
-        # Step 10: Ask clarification for medium confidence
-        if best_confidence >= 0.70:
-            suggested_app = best_match["app"]["app_name"]
-
-            return PlannerResponse(
-                intent="open_application",
-                entities=CommandEntities(application=application),
-                steps=[],
-                requires_clarification=True,
-                clarification_question=(
-                    f"Did you mean {suggested_app}?"
+                    "The application name needs clarification."
                 ),
-                status="clarification_required",
-                message="Application name is uncertain."
+                clarification_question=question,
             )
 
-        # Step 13: Reject low-confidence match.
+        if status == "unsupported" or record is None:
+            return self._response(
+                intent="open_application",
+                status="unsupported",
+                message=(
+                    "No supported installed application "
+                    f"was found matching '{target}'."
+                ),
+            )
 
-        # Step 11: Reject low-confidence match
-        return PlannerResponse(
+        # 6. Create the application launch plan.
+        # Stable application IDs are used for execution.
+        step = PlanStep(
+            step_id=1,
+            action="open_application",
+            target=record.app_id,
+            depends_on=[],
+            expected_outcome=(
+                f"{record.display_name} is opened successfully."
+            ),
+            parameters={
+                "application_name": record.display_name,
+            },
+        )
+
+        return self._response(
             intent="open_application",
-            entities=CommandEntities(application=application),
-            steps=[],
-            requires_clarification=False,
-            clarification_question=None,
-            status="unsupported",
-            message=f"{application} is not currently available."
+            status="plan_ready",
+            message=(
+                "Application launch plan created successfully."
+            ),
+            application=record.display_name,
+            steps=[step],
         )

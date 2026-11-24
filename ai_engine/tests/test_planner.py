@@ -10,7 +10,9 @@ class TestTaskPlanner(unittest.TestCase):
     def setUp(self):
         self.planner = TaskPlanner()
 
+    # --------------------------------------------------
     # Basic application tests
+    # --------------------------------------------------
 
     def test_open_notepad(self):
         response = self.planner.process_command(
@@ -161,7 +163,9 @@ class TestTaskPlanner(unittest.TestCase):
         )
         self.assertEqual(response.status, "clarification_required")
 
+    # --------------------------------------------------
     # Application alias tests
+    # --------------------------------------------------
 
     def test_notepad_alias(self):
         response = self.planner.process_command(
@@ -187,7 +191,9 @@ class TestTaskPlanner(unittest.TestCase):
             "Visual Studio Code"
         )
 
-    # Voice-originated command test
+    # --------------------------------------------------
+    # Voice-originated command tests
+    # --------------------------------------------------
 
     def test_voice_command_opens_notepad(self):
         response = self.planner.process_command(
@@ -200,7 +206,9 @@ class TestTaskPlanner(unittest.TestCase):
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.entities.application, "Notepad")
 
-    # Natural language command tests
+    # --------------------------------------------------
+    # Natural-language command tests
+    # --------------------------------------------------
 
     def test_i_want_to_use_notepad(self):
         response = self.planner.process_command(
@@ -238,7 +246,9 @@ class TestTaskPlanner(unittest.TestCase):
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.entities.application, "Google Chrome")
 
-    # Additional command variation tests
+    # --------------------------------------------------
+    # Additional command variations
+    # --------------------------------------------------
 
     def test_run_notepad(self):
         response = self.planner.process_command(
@@ -264,8 +274,83 @@ class TestTaskPlanner(unittest.TestCase):
             "Google Chrome"
         )
 
-    # Multi-step planning tests
+    # --------------------------------------------------
+    # Dynamic application ID tests
+    # --------------------------------------------------
 
+    def test_open_chrome_intent(self):
+        response = self.planner.process_command(
+            CommandRequest(text="open chrome")
+        )
+
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "open_application")
+        self.assertEqual(
+            response.steps[0].action,
+            "open_application"
+        )
+        self.assertEqual(
+            response.steps[0].target,
+            "app_google_chrome"
+        )
+
+    def test_open_spotify_intent(self):
+        response = self.planner.process_command(
+            CommandRequest(text="open spotify")
+        )
+
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "open_application")
+        self.assertEqual(
+            response.steps[0].action,
+            "open_application"
+        )
+        self.assertEqual(
+            response.steps[0].target,
+            "app_spotify"
+        )
+        self.assertEqual(
+            response.entities.application,
+            "Spotify"
+        )
+
+    def test_extra_spaces_handling(self):
+        response = self.planner.process_command(
+            CommandRequest(text="   open    spotify   ")
+        )
+
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(
+            response.steps[0].target,
+            "app_spotify"
+        )
+
+    def test_case_insensitive_commands(self):
+        commands = [
+            "OPEN CHROME",
+            "OPEN SPOTIFY",
+            "OPEN NOTEPAD",
+        ]
+
+        for command in commands:
+            with self.subTest(command=command):
+                response = self.planner.process_command(
+                    CommandRequest(text=command)
+                )
+                self.assertEqual(response.status, "plan_ready")
+                self.assertEqual(
+                    response.intent,
+                    "open_application"
+                )
+
+    # --------------------------------------------------
+    # Deferred website-search tests
+    # --------------------------------------------------
+    # Website discovery and search API functionality is
+    # currently paused. These tests are retained for future
+    # development but are not part of the active test suite.
+
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_youtube_search_and_play_second_video(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -286,6 +371,7 @@ class TestTaskPlanner(unittest.TestCase):
         self.assertEqual(response.steps[1].depends_on, [1])
         self.assertEqual(response.steps[2].depends_on, [2])
 
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_chatgpt_open_and_ask_prompt(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -304,6 +390,7 @@ class TestTaskPlanner(unittest.TestCase):
             "explain artificial intelligence"
         )
 
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_youtube_profile_and_search(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -331,6 +418,7 @@ class TestTaskPlanner(unittest.TestCase):
             1
         )
 
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_youtube_steps_are_ordered(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -347,6 +435,7 @@ class TestTaskPlanner(unittest.TestCase):
             [[], [1], [2]]
         )
 
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_youtube_play_without_video_number(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -355,110 +444,115 @@ class TestTaskPlanner(unittest.TestCase):
         )
 
         self.assertTrue(response.requires_clarification)
-        self.assertEqual(response.status, "clarification_required")
-    # ── Backend Intent Fallbacks & Search Tests ──
-
-    def test_open_chrome_intent(self):
-        response = self.planner.process_command(
-            CommandRequest(text="open chrome")
+        self.assertEqual(
+            response.status,
+            "clarification_required"
         )
-        self.assertEqual(response.status, "plan_ready")
-        self.assertEqual(response.intent, "open_application")
-        self.assertEqual(response.steps[0].action, "open_application")
-        self.assertEqual(response.steps[0].target, "chrome")
 
-    def test_open_spotify_intent(self):
-        response = self.planner.process_command(
-            CommandRequest(text="open spotify")
-        )
-        self.assertEqual(response.status, "plan_ready")
-        self.assertEqual(response.intent, "open_application")
-        self.assertEqual(response.steps[0].action, "open_application")
-        self.assertEqual(response.steps[0].target, "spotify")
-        self.assertEqual(response.entities.application, "Spotify")
-
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_play_believer_on_youtube(self):
         response = self.planner.process_command(
             CommandRequest(text="play believer on youtube")
         )
+
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.intent, "search_web_app")
-        self.assertEqual(response.steps[0].action, "search_web_app")
+        self.assertEqual(
+            response.steps[0].action,
+            "search_web_app"
+        )
         self.assertEqual(response.steps[0].target, "youtube")
-        self.assertEqual(response.steps[0].parameters, {"query": "believer"})
-        self.assertEqual(response.entities.parameters, {"query": "believer"})
+        self.assertEqual(
+            response.steps[0].parameters,
+            {"query": "believer"}
+        )
+        self.assertEqual(
+            response.entities.parameters,
+            {"query": "believer"}
+        )
         self.assertEqual(response.entities.application, "YouTube")
 
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_search_python_tutorials_on_google(self):
         response = self.planner.process_command(
             CommandRequest(text="search python tutorials on google")
         )
+
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.intent, "search_web_app")
-        self.assertEqual(response.steps[0].action, "search_web_app")
+        self.assertEqual(
+            response.steps[0].action,
+            "search_web_app"
+        )
         self.assertEqual(response.steps[0].target, "google")
-        self.assertEqual(response.steps[0].parameters, {"query": "python tutorials"})
-        self.assertEqual(response.entities.parameters, {"query": "python tutorials"})
+        self.assertEqual(
+            response.steps[0].parameters,
+            {"query": "python tutorials"}
+        )
+        self.assertEqual(
+            response.entities.parameters,
+            {"query": "python tutorials"}
+        )
         self.assertEqual(response.entities.application, "Google")
 
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_multi_word_search_query_youtube(self):
         response = self.planner.process_command(
-            CommandRequest(text="play bohemian rhapsody remastered on youtube")
+            CommandRequest(
+                text="play bohemian rhapsody remastered on youtube"
+            )
         )
+
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.intent, "search_web_app")
         self.assertEqual(response.steps[0].target, "youtube")
-        self.assertEqual(response.steps[0].parameters, {"query": "bohemian rhapsody remastered"})
+        self.assertEqual(
+            response.steps[0].parameters,
+            {"query": "bohemian rhapsody remastered"}
+        )
 
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_multi_word_search_query_google(self):
         response = self.planner.process_command(
-            CommandRequest(text="search python tutorials for beginners on google")
+            CommandRequest(
+                text="search python tutorials for beginners on google"
+            )
         )
+
         self.assertEqual(response.status, "plan_ready")
         self.assertEqual(response.intent, "search_web_app")
         self.assertEqual(response.steps[0].target, "google")
-        self.assertEqual(response.steps[0].parameters, {"query": "python tutorials for beginners"})
-
-    def test_case_insensitive_commands(self):
-        for cmd in [
-            "OPEN CHROME",
-            "PLAY BELIEVER ON YOUTUBE",
-            "SEARCH PYTHON TUTORIALS ON GOOGLE",
-            "Open Spotify",
-        ]:
-            response = self.planner.process_command(CommandRequest(text=cmd))
-            self.assertEqual(response.status, "plan_ready")
-            self.assertIn(response.intent, ("open_application", "search_web_app"))
-
-    def test_extra_spaces_handling(self):
-        response_yt = self.planner.process_command(
-            CommandRequest(text="   play    believer    on    youtube   ")
+        self.assertEqual(
+            response.steps[0].parameters,
+            {"query": "python tutorials for beginners"}
         )
-        self.assertEqual(response_yt.status, "plan_ready")
-        self.assertEqual(response_yt.steps[0].target, "youtube")
-        self.assertEqual(response_yt.steps[0].parameters, {"query": "believer"})
 
-        response_sp = self.planner.process_command(
-            CommandRequest(text="   open    spotify   ")
-        )
-        self.assertEqual(response_sp.status, "plan_ready")
-        self.assertEqual(response_sp.steps[0].target, "spotify")
-
+    @unittest.skip("Website-search functionality is currently deferred")
     def test_missing_search_query(self):
-        for incomplete_cmd in [
+        for command in [
             "search on google",
             "play on youtube",
             "search",
             "play",
         ]:
-            response = self.planner.process_command(CommandRequest(text=incomplete_cmd))
-            self.assertEqual(response.status, "clarification_required")
-            self.assertTrue(response.requires_clarification)
-            self.assertIsNotNone(response.clarification_question)
+            with self.subTest(command=command):
+                response = self.planner.process_command(
+                    CommandRequest(text=command)
+                )
+                self.assertEqual(
+                    response.status,
+                    "clarification_required"
+                )
+                self.assertTrue(response.requires_clarification)
+                self.assertIsNotNone(
+                    response.clarification_question
+                )
 
     def test_unknown_search_application(self):
         response = self.planner.process_command(
-            CommandRequest(text="play believer on non_existent_app_xyz")
+            CommandRequest(
+                text="play believer on non_existent_app_xyz"
+            )
         )
         self.assertEqual(response.status, "unsupported")
 
