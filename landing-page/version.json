@@ -1,9 +1,9 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "name": "JM Vertex AI Desktop Companion",
-  "releaseDate": "2026-11-18",
+  "releaseDate": "2026-11-24",
   "downloadUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/payload.zip",
   "setupExeUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/JM-Vertex-AI-Companion-Setup.exe",
   "fallbackWebUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/",
-  "releaseNotes": "Restored Doraemon walk animations & expressions, added YouTube/Spotify playback and Google search, fixed automation engine orchestrator."
+  "releaseNotes": "Chrome multi-profile bypass engine, native Windows GUI automation primitives (typing, clipboard, hotkeys), and GitHub Pages CI/CD fix."
 }
