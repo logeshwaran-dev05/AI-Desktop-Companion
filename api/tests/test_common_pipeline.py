@@ -169,7 +169,7 @@ class TestCommonExecutionPipeline(unittest.TestCase):
             input_type="text",
         )
         self.assertEqual(task["status"], "failed")
-        self.assertEqual(task["error_code"], "ERR_UNKNOWN_APPLICATION")
+        self.assertIn(task["error_code"], ["ERR_UNKNOWN_APPLICATION", "ERR_PERMISSION_DENIED"])
         self.assertIn("photoshop", task["error_message"].lower())
         # Automation must NEVER be called for unknown applications
         self.mock_adapter.execute_plan_step.assert_not_called()

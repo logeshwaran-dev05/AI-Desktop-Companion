@@ -292,29 +292,21 @@ def mouse_click(x: Optional[int] = None, y: Optional[int] = None) -> None:
 
 def clipboard_copy() -> str:
     """
-    Triggers Ctrl+C on the active window and captures the copied text via pyperclip,
-    falling back to native Win32 clipboard reading.
+    Triggers Ctrl+C on the active window and captures the copied text via
+    native Win32 clipboard reading.
     """
     press_hotkey("ctrl", "c")
     time.sleep(0.1)
-    try:
-        import pyperclip
-        return pyperclip.paste()
-    except Exception:
-        return get_clipboard_text()
+    return get_clipboard_text()
 
 
 def clipboard_paste(target_app: Optional[str] = None, text: Optional[str] = None) -> bool:
     """
     Focuses the target window (if specified) and triggers Ctrl+V.
-    If text is provided, copies text to clipboard before pasting (via pyperclip or set_clipboard_text).
+    If text is provided, copies text to clipboard before pasting via native Win32 clipboard.
     """
     if text:
-        try:
-            import pyperclip
-            pyperclip.copy(text)
-        except Exception:
-            set_clipboard_text(text)
+        set_clipboard_text(text)
         time.sleep(0.05)
 
     if target_app and target_app not in {"active_window", ""}:

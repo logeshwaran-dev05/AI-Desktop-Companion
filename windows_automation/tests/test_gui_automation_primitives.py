@@ -103,19 +103,19 @@ class TestGuiAutomationPrimitives(unittest.TestCase):
     def test_direct_clipboard_copy(self):
         from windows_automation.gui_primitives import clipboard_copy
         with patch("windows_automation.gui_primitives.press_hotkey") as mock_hotkey, \
-             patch("pyperclip.paste", return_value="pyperclip_copied"):
+             patch("windows_automation.gui_primitives.get_clipboard_text", return_value="native_copied"):
             result = clipboard_copy()
             mock_hotkey.assert_called_once_with("ctrl", "c")
-            self.assertEqual(result, "pyperclip_copied")
+            self.assertEqual(result, "native_copied")
 
     def test_direct_clipboard_paste(self):
         from windows_automation.gui_primitives import clipboard_paste
         with patch("windows_automation.gui_primitives.focus_window_by_title") as mock_focus, \
              patch("windows_automation.gui_primitives.press_hotkey") as mock_hotkey, \
-             patch("pyperclip.copy") as mock_copy:
+             patch("windows_automation.gui_primitives.set_clipboard_text") as mock_set:
             res = clipboard_paste(target_app="Notepad", text="Text to paste")
             self.assertTrue(res)
-            mock_copy.assert_called_once_with("Text to paste")
+            mock_set.assert_called_once_with("Text to paste")
             mock_focus.assert_called_once_with("Notepad")
             mock_hotkey.assert_called_once_with("ctrl", "v")
 

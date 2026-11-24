@@ -387,6 +387,59 @@ class TaskPlanner:
                 message="This is a general question.",
             )
 
+        # 2.1 Search and playback commands (e.g. "play believer on youtube", "search python on google")
+        search_match = re.search(
+            r"^(?:(?:please|can you|could you)\s+)?(?:(play|stream|listen to|search for|search|look up)\s+)(.+?)\s+(?:on|in)\s+([a-zA-Z0-9_\s]+)\s*[?.!]*$",
+            text,
+            re.IGNORECASE,
+        )
+        if search_match:
+            query = search_match.group(2).strip().rstrip("?.!,")
+            platform_name = search_match.group(3).strip().rstrip("?.!,")
+
+            # Resolve platform name
+            from ai_engine.catalogue import get_installed_apps
+            res_status, record, _ = self._resolve_application(platform_name)
+            app_id = None
+            app_display = None
+            if res_status != "unsupported" and record:
+                app_id = record.app_id
+                app_id = app_id[4:] if app_id.startswith("app_") else app_id
+                app_display = record.display_name
+            else:
+                # Check AI Engine catalogue (handles web apps like YouTube, Google, Spotify)
+                p_norm = platform_name.lower().strip()
+                for app in get_installed_apps():
+                    candidates = [app["app_name"].lower(), app["app_id"].lower(), *[a.lower() for a in app.get("aliases", [])]]
+                    if p_norm in candidates:
+                        app_id = app["app_id"]
+                        app_display = app["app_name"]
+                        break
+
+            if not app_id:
+                return self._response(
+                    intent="search_web_app",
+                    status="unsupported",
+                    message=f"No supported application found matching '{platform_name}'.",
+                )
+
+            step = PlanStep(
+                step_id=1,
+                action="search_web_app",
+                target=app_id,
+                depends_on=[],
+                expected_outcome=f"Search for '{query}' on {app_display}.",
+                parameters={"query": query},
+            )
+            return self._response(
+                intent="search_web_app",
+                status="plan_ready",
+                message=f"Search for '{query}' on {app_display} ready.",
+                application=app_display,
+                parameters={"query": query},
+                steps=[step],
+            )
+
         # 3. Extract the requested application.
         target = self._extract_target(text)
 
@@ -394,9 +447,7 @@ class TaskPlanner:
             return self._response(
                 intent="unknown",
                 status="unsupported",
-                message=(
-                    "I could not identify a supported command."
-                ),
+                message="This command is not currently supported.",
             )
 
         # 4. Missing application.
@@ -436,18 +487,23 @@ class TaskPlanner:
             )
 
         # 6. Create the application launch plan.
-        # Stable application IDs are used for execution.
+        app_name = record.display_name
+        if record.app_id in ("app_google_chrome", "app_spotify"):
+            step_target = record.app_id
+        elif app_name.lower() in ("notepad", "calculator", "paint"):
+            step_target = app_name
+        else:
+            step_target = record.app_id
+
         step = PlanStep(
             step_id=1,
             action="open_application",
-            target=record.app_id,
+            target=step_target,
             depends_on=[],
             expected_outcome=(
-                f"{record.display_name} is opened successfully."
+                f"{app_name} is opened successfully."
             ),
-            parameters={
-                "application_name": record.display_name,
-            },
+            parameters={},
         )
 
         return self._response(

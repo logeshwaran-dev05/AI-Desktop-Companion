@@ -334,22 +334,27 @@ class ApplicationResolver:
         if not clean:
             return None
 
+        clean_no_prefix = clean[4:] if clean.startswith("app_") else clean
+        clean_space = clean_no_prefix.replace("_", " ")
+
         # 1. Direct check against AI Engine catalogue by app_name, app_id, or executable
         for app in self.catalogue:
-            if clean in (
+            candidates = (
                 app["app_name"].lower(),
                 app["app_id"].lower(),
                 app.get("executable", "").lower(),
                 app["app_name"].replace(" ", "").lower(),
-            ):
+            )
+            if clean in candidates or clean_no_prefix in candidates or clean_space in candidates:
                 return app
 
         # 2. Check static ALIASES map
-        if clean in self.ALIASES:
-            aliased_id = self.ALIASES[clean]
-            for app in self.catalogue:
-                if app["app_id"] == aliased_id:
-                    return app
+        for check in (clean, clean_no_prefix, clean_space):
+            if check in self.ALIASES:
+                aliased_id = self.ALIASES[check]
+                for app in self.catalogue:
+                    if app["app_id"] == aliased_id:
+                        return app
 
         # 3. Windows Application Catalogue (dynamic — covers Settings pages, built-ins, third‑party)
         catalogue_entry = _windows_catalogue.resolve_phrase(target)
@@ -385,7 +390,7 @@ class PermissionEvaluator:
     requiring user authorization.
     """
 
-    DIRECT_ALLOWLIST = {"notepad", "notepad.exe"}
+    DIRECT_ALLOWLIST = {"notepad", "notepad.exe", "app_notepad"}
 
     def evaluate(self, task_id: str, action_name: str, target: str) -> AuthorizationDecision:
         """
@@ -395,6 +400,7 @@ class PermissionEvaluator:
         decision_id = f"dec_{uuid4()}"
         clean_action = (action_name or "").strip()
         clean_target = (target or "").strip().lower()
+        clean_target_base = clean_target[4:] if clean_target.startswith("app_") else clean_target
 
         # Check supported actions
         if clean_action not in ("open_application", "search_web_app"):
@@ -424,7 +430,7 @@ class PermissionEvaluator:
             )
 
         # 1. Milestone 1 Allowlist Check: Direct launch granted for Notepad
-        if clean_target in self.DIRECT_ALLOWLIST:
+        if clean_target in self.DIRECT_ALLOWLIST or clean_target_base in self.DIRECT_ALLOWLIST:
             return AuthorizationDecision(
                 decision_id=decision_id,
                 permission_status="granted",
@@ -804,7 +810,6 @@ class TaskOrchestrator:
             target=canonical_target,
             depends_on=step_data.get("depends_on", []),
             expected_outcome=step_data.get("expected_outcome", ""),
-            parameters={},
             parameters=step_params,
         )
 
@@ -1023,7 +1028,6 @@ class TaskOrchestrator:
                 depends_on=step_data.get("depends_on", []),
                 expected_outcome=step_data.get("expected_outcome", ""),
                 parameters=merged_params,
-                parameters=step_data.get("parameters", {}),
             )
 
             try:
