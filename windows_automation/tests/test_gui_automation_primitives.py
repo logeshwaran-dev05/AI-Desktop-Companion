@@ -127,6 +127,26 @@ class TestGuiAutomationPrimitives(unittest.TestCase):
             self.assertTrue(res)
             mock_mouse.assert_called_once_with(520, 280 + 2 * 180)
 
+    def test_prompt_ai_chat_action(self):
+        req = ActionRequest(
+            action_id="act-ai-1",
+            task_id="task-1",
+            action_name="prompt_ai_chat",
+            target="ChatGPT",
+            parameters={
+                "prompt": "write an email to my manager",
+                "delay_before_type": 0.0,
+                "use_clipboard": True,
+            }
+        )
+        with patch("windows_automation.gui_primitives.focus_window_by_title", return_value=True) as mock_focus, \
+             patch("windows_automation.gui_primitives.clipboard_paste", return_value=True) as mock_paste:
+            res = self.executor.execute(req)
+            self.assertEqual(res.status, "completed")
+            self.assertEqual(res.verification_status, "verified")
+            mock_focus.assert_called_once_with("ChatGPT")
+            mock_paste.assert_called_once_with(target_app="ChatGPT", text="write an email to my manager")
+
 
 if __name__ == "__main__":
     unittest.main()

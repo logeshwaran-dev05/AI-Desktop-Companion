@@ -28,6 +28,7 @@ class WindowsActionPolicy:
         "click_element",
         "click_youtube_result",
         "wait",
+        "prompt_ai_chat",
     }
 
     # Forbidden shell execution tokens / dangerous argument patterns
@@ -128,7 +129,7 @@ class WindowsActionPolicy:
             )
 
         if not request.target or not request.target.strip():
-            if request.action_name in {"clipboard_copy", "wait", "type_text", "press_hotkey", "clipboard_paste", "click_youtube_result"}:
+            if request.action_name in {"clipboard_copy", "wait", "type_text", "press_hotkey", "clipboard_paste", "click_youtube_result", "prompt_ai_chat"}:
                 request.target = "active_window"
             else:
                 return False, "ERR_INVALID_REQUEST", "Target cannot be empty."
@@ -188,6 +189,7 @@ class WindowsActionPolicy:
             "click_element",
             "click_youtube_result",
             "wait",
+            "prompt_ai_chat",
         }:
             return True, None, None
 

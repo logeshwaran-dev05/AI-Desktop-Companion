@@ -238,33 +238,47 @@ def set_clipboard_text(text: str) -> bool:
 def focus_window_by_title(title_substring: str) -> bool:
     """
     Search all top-level windows for one matching title_substring (case-insensitive)
-    and bring it to the foreground.
+    and bring it to the foreground with Win32 foreground lock bypass.
     """
     if not user32:
         return False
 
-    found_hwnd = None
+    def _find_hwnd(needle: str):
+        target_hwnd = None
 
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def enum_windows_callback(hwnd, _lparam):
-        nonlocal found_hwnd
-        if user32.IsWindowVisible(hwnd):
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length > 0:
-                buf = ctypes.create_unicode_buffer(length + 1)
-                user32.GetWindowTextW(hwnd, buf, length + 1)
-                if title_substring.lower() in buf.value.lower():
-                    found_hwnd = hwnd
-                    return False  # stop enumeration
-        return True
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def enum_windows_callback(hwnd, _lparam):
+            nonlocal target_hwnd
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buf, length + 1)
+                    if needle.lower() in buf.value.lower():
+                        target_hwnd = hwnd
+                        return False  # stop enumeration
+            return True
 
-    user32.EnumWindows(enum_windows_callback, 0)
+        user32.EnumWindows(enum_windows_callback, 0)
+        return target_hwnd
+
+    found_hwnd = _find_hwnd(title_substring)
+    if not found_hwnd and title_substring.lower() in ("chatgpt", "gemini", "youtube", "claude"):
+        # Fallback to browser window if web app is open in an existing Chrome/Edge tab
+        for browser_needle in ("Chrome", "Edge", "Brave"):
+            found_hwnd = _find_hwnd(browser_needle)
+            if found_hwnd:
+                break
 
     if found_hwnd:
         # Restore window if minimized
         SW_RESTORE = 9
         user32.ShowWindow(found_hwnd, SW_RESTORE)
+        # Alt-key trick to bypass Windows foreground lock
+        VK_MENU = 0x12
+        user32.keybd_event(VK_MENU, 0, 0, 0)
         user32.SetForegroundWindow(found_hwnd)
+        user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
         time.sleep(0.1)
         return True
 

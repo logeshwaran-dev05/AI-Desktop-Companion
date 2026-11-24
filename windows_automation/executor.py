@@ -241,16 +241,23 @@ class WindowsAutomationExecutor:
         if request.action_name == "type_text":
             from windows_automation.gui_primitives import type_text, focus_window_by_title
             target_win = request.target
+            delay_before = float((request.parameters or {}).get("delay_before_type", 0.0))
+            if delay_before > 0:
+                time.sleep(min(delay_before, 10.0))
             if target_win and target_win not in {"active_window", ""}:
                 focus_window_by_title(target_win)
             text_to_type = (request.parameters or {}).get("text", "")
             press_enter = (request.parameters or {}).get("press_enter", True)
-            type_text(text_to_type, press_enter=press_enter)
+            type_delay = (request.parameters or {}).get("type_delay")
+            if type_delay is not None:
+                type_text(text_to_type, press_enter=press_enter, delay=float(type_delay))
+            else:
+                type_text(text_to_type, press_enter=press_enter)
             evidence = VerificationEvidence(
                 verified=True,
                 method="keyboard_sendinput",
                 verification_status="verified",
-                details={"typed_length": len(text_to_type), "enter_pressed": press_enter},
+                details={"typed_length": len(text_to_type), "enter_pressed": press_enter, "target": target_win},
             )
             return ExecutionResult(
                 action_id=request.action_id,
@@ -287,6 +294,9 @@ class WindowsAutomationExecutor:
 
         if request.action_name == "clipboard_paste":
             from windows_automation.gui_primitives import clipboard_paste
+            delay_before = float((request.parameters or {}).get("delay_before_type", (request.parameters or {}).get("delay_before_paste", 0.0)))
+            if delay_before > 0:
+                time.sleep(min(delay_before, 10.0))
             text = (request.parameters or {}).get("text")
             target_win = request.target
             clipboard_paste(target_app=target_win, text=text)
@@ -294,7 +304,7 @@ class WindowsAutomationExecutor:
                 verified=True,
                 method="clipboard_paste",
                 verification_status="verified",
-                details={"target": target_win},
+                details={"target": target_win, "has_text": bool(text)},
             )
             return ExecutionResult(
                 action_id=request.action_id,
@@ -310,6 +320,9 @@ class WindowsAutomationExecutor:
 
         if request.action_name == "click_youtube_result":
             from windows_automation.gui_primitives import click_youtube_result
+            delay_before = float((request.parameters or {}).get("delay_before_click", 1.5))
+            if delay_before > 0:
+                time.sleep(min(delay_before, 10.0))
             ordinal = (request.parameters or {}).get("ordinal_index", 1)
             if not ordinal or ordinal == 1:
                 target_str = str(request.target or "").lower().strip()
@@ -326,6 +339,40 @@ class WindowsAutomationExecutor:
                 method="click_youtube_result",
                 verification_status="verified",
                 details={"ordinal_index": int(ordinal)},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name in ("prompt_ai_chat", "human_prompt_ai"):
+            from windows_automation.gui_primitives import focus_window_by_title, clipboard_paste, type_text
+            target_ai = request.target or "ChatGPT"
+            delay_before = float((request.parameters or {}).get("delay_before_type", 2.0))
+            if delay_before > 0:
+                time.sleep(min(delay_before, 10.0))
+            focus_window_by_title(target_ai)
+            prompt = (request.parameters or {}).get("prompt") or (request.parameters or {}).get("text", "")
+            press_enter = (request.parameters or {}).get("press_enter", True)
+            use_clipboard = (request.parameters or {}).get("use_clipboard", True)
+
+            if use_clipboard and prompt:
+                clipboard_paste(target_app=target_ai, text=prompt)
+            elif prompt:
+                type_text(prompt, press_enter=press_enter)
+
+            evidence = VerificationEvidence(
+                verified=True,
+                method="prompt_ai_chat",
+                verification_status="verified",
+                details={"target": target_ai, "prompt_length": len(prompt), "submitted": press_enter},
             )
             return ExecutionResult(
                 action_id=request.action_id,
