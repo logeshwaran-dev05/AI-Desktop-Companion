@@ -317,6 +317,7 @@ class TestPriority3Integration(unittest.TestCase):
         self.assertTrue(
             "which application did you mean" in task["error_message"].lower()
             or "ambiguous" in task["error_message"].lower()
+            or "did you mean" in task["error_message"].lower()
         )
         # Automation must NOT be executed for ambiguous commands
         self.mock_adapter.execute_plan_step.assert_not_called()

@@ -56,7 +56,7 @@ def main():
     # 1. Start FastAPI server
     print("\n[1/3] Starting Backend API Server (AI Engine + Windows Automation)...")
     backend_proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "api.server:app", "--host", "127.0.0.1", "--port", "8000"],
+        [sys.executable, "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000"],
         cwd=str(REPO_ROOT),
     )
 

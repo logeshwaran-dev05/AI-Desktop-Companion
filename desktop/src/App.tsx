@@ -4,6 +4,7 @@ import './App.css'
 import './avatarAnimations.css'
 import AvatarCharacter from './AvatarCharacter'
 import type { AvatarAnimState } from './AvatarCharacter'
+import { AVATAR_CONFIG } from './avatarConfig'
 import {
   resolveAppIntent,
   isLaunchIntent,
@@ -54,6 +55,9 @@ export type Message = {
   text: string
   time: string
   launchResult?: LaunchResult
+  matches?: Array<{ name: string; path: string; isFolder?: boolean; extension?: string }>
+  phase?: string
+  step?: number
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -96,7 +100,8 @@ function toAnimState(
 ): AvatarAnimState {
   if (isSleeping) return 'idle'
   if (isVoiceRecording) return 'listening'
-  if (isInTransit || launchState === 'running' || launchState === 'launching') return 'walking'
+  // CRITICAL: Doraemon only plays the walking animation when he is physically in transit!
+  if (isInTransit) return 'walking'
   if (launchState === 'resolving' || launchState === 'planning') return 'thinking'
   if (launchState === 'success') return 'success'
   if (launchState === 'error' || launchState === 'failed' || launchState === 'not-allowed' || launchState === 'not-in-electron') return 'error'
@@ -104,7 +109,7 @@ function toAnimState(
   switch (avatarState) {
     case 'Listening':          return 'listening'
     case 'Thinking':           return 'thinking'
-    case 'Working':            return isInTransit ? 'walking' : 'thinking'
+    case 'Working':            return isInTransit ? 'walking' : 'idle'
     case 'Greeting':           return 'greeting'
     case 'Approval Required':  return 'waiting'
     case 'Success':            return 'success'
@@ -224,6 +229,8 @@ export default function App() {
   // ── Live task progress ──
   const [liveProgress, setLiveProgress] = useState<LiveTaskProgress | null>(null)
   const taskCancelledRef = useRef<boolean>(false)
+  const isTaskActiveRef = useRef<boolean>(false)
+  const returnHomeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [launchState, setLaunchState] = useState<LaunchState>('idle')
   const [currentLaunchResult, setCurrentLaunchResult] = useState<LaunchResult | null>(null)
 
@@ -234,9 +241,73 @@ export default function App() {
   const [updateStatusMsg, setUpdateStatusMsg] = useState('')
   const [appVersion, setAppVersion] = useState('1.0.1')
 
+  useEffect(() => {
+    if (window.companionAPI?.getCurrentVersion) {
+      window.companionAPI.getCurrentVersion().then((v) => {
+        if (v) setAppVersion(v)
+      }).catch(() => {})
+    }
+    if (window.companionAPI?.onUpdateAvailable) {
+      const unsub = window.companionAPI.onUpdateAvailable((info) => {
+        setUpdateInfo(info)
+        if (info.updateAvailable) {
+          setUpdateStatusMsg(`Update available: v${info.remoteVersion || ''}`)
+        }
+      })
+      return unsub
+    }
+  }, [])
+
+  const handleCheckUpdates = useCallback(async () => {
+    if (!window.companionAPI?.checkUpdates) return
+    setIsUpdating(true)
+    setUpdateStatusMsg('Checking for updates…')
+    try {
+      const res = await window.companionAPI.checkUpdates()
+      setUpdateInfo(res)
+      if (res.updateAvailable) {
+        setUpdateStatusMsg(`Update available: v${res.remoteVersion || ''}`)
+      } else {
+        setUpdateStatusMsg('You are running the latest version.')
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setUpdateStatusMsg(`Update check failed: ${msg}`)
+    } finally {
+      setIsUpdating(false)
+    }
+  }, [])
+
+  const handleApplyUpdate = useCallback(async () => {
+    if (!window.companionAPI?.applyUpdate || !updateInfo) return
+    setIsUpdating(true)
+    setUpdateStatusMsg('Downloading and applying update…')
+    try {
+      const res = await window.companionAPI.applyUpdate(updateInfo)
+      if (res.success) {
+        setIsUpdateReadyToRestart(true)
+        setUpdateStatusMsg('Update applied! Restart to complete.')
+      } else {
+        setUpdateStatusMsg(`Update failed: ${res.error || 'Unknown error'}`)
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setUpdateStatusMsg(`Update failed: ${msg}`)
+    } finally {
+      setIsUpdating(false)
+    }
+  }, [updateInfo])
+
+  const handleRelaunch = useCallback(async () => {
+    if (window.companionAPI?.relaunchApp) {
+      await window.companionAPI.relaunchApp()
+    }
+  }, [])
+
   // ── Refs ──
   const avatarDragStart = useRef<{ screenX: number; screenY: number; moved: boolean } | null>(null)
   const messageInputRef = useRef<HTMLTextAreaElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const voiceAutoEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const latestSpeechRef = useRef<string>('')
 
@@ -286,22 +357,52 @@ export default function App() {
         if (step.facing) setFacing(step.facing)
       })
 
-      if (window.companionAPI.getCurrentVersion) {
-        window.companionAPI.getCurrentVersion().then((v) => { if (v) setAppVersion(v) })
-      }
+      const cleanupProgress = window.companionAPI.onTaskProgress?.((progressData: any) => {
+        const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        setMessages((prev) => {
+          if (prev.length > 0 && prev[prev.length - 1].text === progressData.message) {
+            return prev
+          }
+          return [
+            ...prev,
+            {
+              id: Date.now() + Math.random(),
+              author: 'Companion',
+              text: progressData.message || '',
+              time: timeNow,
+              matches: progressData.matches,
+              phase: progressData.phase,
+              step: progressData.step,
+            },
+          ]
+        })
 
-      const cleanupUpdate = window.companionAPI.onUpdateAvailable?.((info) => {
-        setUpdateInfo(info)
-      })
-
-      const cleanupUpdateDone = window.companionAPI.onUpdateCompleted?.((res) => {
-        setIsUpdating(false)
-        if (res.success) {
-          setIsUpdateReadyToRestart(true)
-          setUpdateStatusMsg('🎉 Update applied successfully! Restart companion to complete.')
-          voiceService.speakResponse('Companion updated successfully!')
-        } else {
-          setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
+        if (progressData.phase === 'finding' || progressData.phase === 'searching') {
+          setAvatarState('Thinking')
+        } else if (progressData.phase === 'clarification_required') {
+          setAvatarState('Approval Required')
+          setLaunchState('awaiting_approval')
+          setIsChatboxOpen(true)
+          window.companionAPI?.setChatboxOpen?.(true)
+        } else if (
+          progressData.phase === 'walking' ||
+          progressData.phase === 'moving_to_search_field' ||
+          progressData.phase === 'moving_to_result'
+        ) {
+          setAvatarState('Working')
+          setIsInTransit(true)
+        } else if (progressData.phase === 'opening' || progressData.phase === 'opening_search') {
+          setAvatarState('Working')
+          setIsInTransit(false)
+        } else if (progressData.phase === 'results_found') {
+          setAvatarState('Working')
+          setIsInTransit(false)
+        } else if (progressData.phase === 'success') {
+          setAvatarState('Success')
+          setIsInTransit(false)
+        } else if (progressData.phase === 'failed') {
+          setAvatarState('Error')
+          setIsInTransit(false)
         }
       })
 
@@ -312,8 +413,7 @@ export default function App() {
       return () => {
         cleanup()
         if (cleanupMove) cleanupMove()
-        if (cleanupUpdate) cleanupUpdate()
-        if (cleanupUpdateDone) cleanupUpdateDone()
+        if (cleanupProgress) cleanupProgress()
       }
     }
   }, [])
@@ -327,8 +427,17 @@ export default function App() {
         micTestCleanupRef.current()
         micTestCleanupRef.current = null
       }
+      if (returnHomeTimerRef.current) {
+        clearTimeout(returnHomeTimerRef.current)
+        returnHomeTimerRef.current = null
+      }
     }
   }, [clearVoiceAutoEndTimer])
+
+  // Auto-scroll chatbox to newest message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   // Helper to update Live Task Progress
   const updateProgressStage = useCallback((
@@ -363,6 +472,11 @@ export default function App() {
   // ── Cancellation Handler ────────────────────────────────────────────────────
   const cancelActiveTask = useCallback(() => {
     taskCancelledRef.current = true
+    isTaskActiveRef.current = false
+    if (returnHomeTimerRef.current) {
+      clearTimeout(returnHomeTimerRef.current)
+      returnHomeTimerRef.current = null
+    }
     clearVoiceAutoEndTimer()
 
     if (isVoiceRecording) {
@@ -371,7 +485,9 @@ export default function App() {
       setAudioLevel(0)
     }
 
-    if (window.companionAPI?.cancelMovement) {
+    if (window.companionAPI?.cancelTask) {
+      window.companionAPI.cancelTask()
+    } else if (window.companionAPI?.cancelMovement) {
       window.companionAPI.cancelMovement()
     }
 
@@ -395,23 +511,35 @@ export default function App() {
       }
     })
 
-    if (window.companionAPI?.returnHome) {
-      setTimeout(() => {
-        window.companionAPI?.returnHome()
-        setAvatarState('Idle')
-        setLaunchState('idle')
-      }, 2500)
-    }
+    returnHomeTimerRef.current = setTimeout(() => {
+      if (window.companionAPI?.returnHome) {
+        window.companionAPI.returnHome()
+      }
+      setAvatarState('Idle')
+      setLaunchState('idle')
+    }, 2500)
   }, [clearVoiceAutoEndTimer, isVoiceRecording])
 
   // ── Unified Launch & Automation Execution Flow ──────────────────────────────
-  const handleLaunchApp = useCallback(async (rawText: string) => {
+  const handleLaunchApp = useCallback(async (
+    rawText: string,
+    specificChoice?: { name: string; path: string }
+  ) => {
     // When a task is launched from the floating chatbox, collapse it so Doraemon travels alone
     if (isChatboxOpen) {
       setIsChatboxOpen(false)
       if (window.companionAPI?.setChatboxOpen) {
         window.companionAPI.setChatboxOpen(false)
       }
+    }
+
+    if (returnHomeTimerRef.current) {
+      clearTimeout(returnHomeTimerRef.current)
+      returnHomeTimerRef.current = null
+    }
+    isTaskActiveRef.current = true
+    if (window.companionAPI?.cancelActiveMovement) {
+      window.companionAPI.cancelActiveMovement()
     }
 
     taskCancelledRef.current = false
@@ -433,76 +561,75 @@ export default function App() {
     updateProgressStage('understanding', 'in_progress', 'Analyzing natural language intent…', 30)
 
     const intent = resolveAppIntent(rawText)
-    if (!intent) {
-      const errorMsg = `No recognized application found in: "${rawText}". Permitted: Notepad, Calculator, File Explorer, Chrome, VS Code, WhatsApp.`
-      updateProgressStage('understanding', 'failed', errorMsg, 35)
+    let appId = ''
+    let displayName = rawText.trim()
+    let rawCommand = rawText.trim()
 
-      const result: LaunchResult = {
-        state: 'not-allowed',
-        displayName: rawText,
-        appId: '',
-        realLaunch: false,
-        errorMessage: errorMsg,
+    if (specificChoice) {
+      displayName = specificChoice.name
+      rawCommand = specificChoice.path
+    } else if (intent) {
+      appId = intent.appId
+      displayName = intent.displayName
+      rawCommand = intent.displayName
+    } else {
+      // Clean up common action prefixes (e.g. "open pokedex" -> "pokedex", "show folder Design thinking" -> "Design thinking")
+      const cleaned = rawText
+        .replace(/^(?:please\s+)?(?:can\s+you\s+)?(?:could\s+you\s+)?(?:i\s+want\s+to\s+)?(?:open|launch|start|run|show|access|find|goto)\s+(?:the\s+)?(?:folder\s+|file\s+|app\s+|application\s+)?/i, '')
+        .trim()
+        .replace(/[?.!]+$/, '')
+      if (cleaned) {
+        displayName = cleaned
+        rawCommand = cleaned
       }
-      setLaunchState('not-allowed')
-      setCurrentLaunchResult(result)
-      setAvatarState('Error')
-      voiceService.speakResponse(`I could not recognize that application: ${rawText}`)
-
-      setMessages((prev) => [
-        ...prev,
-        { id: Date.now(), author: 'You', text: rawText, time: timeStr },
-        { id: Date.now() + 1, author: 'Companion', text: errorMsg, time: timeStr, launchResult: result },
-      ])
-      setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Failed', time: timeStr, launchResult: result }])
-      setTimeout(() => { setLaunchState('idle'); setAvatarState('Idle') }, 4000)
-      return
     }
 
-    if (taskCancelledRef.current) return
-    const intentDetail = intent.query
-      ? (intent.actionType === 'play'
-          ? `Identified playback: "${intent.query}" on ${intent.displayName}`
-          : `Identified search query: "${intent.query}" on ${intent.displayName}`)
-      : `Identified target application: ${intent.displayName} (${intent.appId})`
-    updateProgressStage('understanding', 'completed', intentDetail, 45)
-
-    updateProgressStage('validating', 'in_progress', `Validating ${intent.displayName} allowlist status…`, 55)
-    await new Promise((r) => setTimeout(r, 250))
+    const isFileExplorerApp = Boolean(rawText.match(/\b(?:file\s+explorer|explorer|my\s+computer|file\s+manager)\b/i))
+    const isExplicitFileSearch = !isFileExplorerApp && (Boolean(specificChoice) || Boolean(rawText.match(/\b(folder|file|document|dir)\b/i)))
+    const isAppTarget = isFileExplorerApp || (!isExplicitFileSearch && (Boolean(intent) || Boolean(rawText.match(/\b(app|application|program|software|tool|calc|calculator|notepad|chrome|code|vscode|whatsapp|spotify|netflix|browser)\b/i))))
+    const targetKind: 'application' | 'file_or_folder' | 'auto' = isExplicitFileSearch ? 'file_or_folder' : (isAppTarget ? 'application' : 'auto')
 
     if (taskCancelledRef.current) return
-    updateProgressStage('validating', 'completed', `Validated ${intent.displayName}. Target shortcut path resolved.`, 65)
+    updateProgressStage('understanding', 'completed', `Identified target: ${displayName}`, 45)
+
+    updateProgressStage('validating', 'in_progress', isAppTarget ? `Searching installed applications & shortcuts for ${displayName}…` : `Locating coordinates for ${displayName}…`, 55)
+    await new Promise((r) => setTimeout(r, 200))
+
+    if (taskCancelledRef.current) return
+    updateProgressStage('validating', 'completed', `Target "${displayName}" verified. Ready to dispatch.`, 65)
 
     setLaunchState('planning')
     setAvatarState('Thinking')
-    updateProgressStage('waiting_execution', 'in_progress', 'Preparing transparent companion coordinates…', 70)
+    updateProgressStage('waiting_execution', 'in_progress', 'Preparing companion coordinates…', 70)
     setMessages((prev) => [
       ...prev,
-      { id: Date.now(), author: 'You', text: rawText, time: timeStr },
+      { id: Date.now(), author: 'You', text: specificChoice ? `Selected: ${specificChoice.name}` : rawText, time: timeStr },
     ])
-    await new Promise((r) => setTimeout(r, 350))
+    await new Promise((r) => setTimeout(r, 250))
 
     if (taskCancelledRef.current) return
     updateProgressStage('waiting_execution', 'completed', 'Companion positioned. Motion trajectory generated.', 75)
 
     setLaunchState('launching')
     setAvatarState('Working')
-    updateProgressStage('launch_attempted', 'in_progress', `Doraemon physically moving across desktop to ${intent.displayName}…`, 85)
+    updateProgressStage('launch_attempted', 'in_progress', `Doraemon physically moving across desktop to ${displayName}…`, 85)
 
     let taskResult: import('./companion').DesktopTaskResult
 
     if (window.companionAPI?.startDesktopTask) {
       try {
         taskResult = await window.companionAPI.startDesktopTask({
-          appId: intent.appId,
-          displayName: intent.displayName,
-          query: intent.query,
+          appId,
+          displayName,
+          rawCommand,
+          pathChoice: specificChoice?.path,
+          targetKind,
         })
       } catch (err: unknown) {
         taskResult = {
           success: false,
           verified: false,
-          displayName: intent.displayName,
+          displayName,
           mode: executionMode,
           taskState: 'failed',
           executionMode,
@@ -512,9 +639,9 @@ export default function App() {
     } else {
       // Browser preview mode -> forward to local dev server backend
       const candidateUrls = [
-        `/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,
-        `http://127.0.0.1:5173/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,
-        `http://localhost:5173/api/launch-app?appId=${encodeURIComponent(intent.appId)}`,
+        `/api/launch-app?appId=${encodeURIComponent(appId || displayName)}`,
+        `http://127.0.0.1:5173/api/launch-app?appId=${encodeURIComponent(appId || displayName)}`,
+        `http://localhost:5173/api/launch-app?appId=${encodeURIComponent(appId || displayName)}`,
       ]
 
       let fetchedResult: import('./companion').IpcLaunchResult | null = null
@@ -542,7 +669,7 @@ export default function App() {
         taskResult = {
           success: false,
           verified: false,
-          displayName: intent.displayName,
+          displayName,
           mode: 'real',
           taskState: 'failed',
           executionMode: 'real',
@@ -555,8 +682,8 @@ export default function App() {
       updateProgressStage('launch_verified', 'cancelled', 'Task cancelled by user before verification.', 85)
       const result: LaunchResult = {
         state: 'cancelled',
-        displayName: intent.displayName,
-        appId: intent.appId,
+        displayName,
+        appId,
         realLaunch: false,
         cancelled: true,
         errorMessage: 'Movement cancelled by user request.',
@@ -564,17 +691,17 @@ export default function App() {
       setLaunchState('cancelled')
       setCurrentLaunchResult(result)
       setAvatarState('Error')
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          author: 'Companion',
-          text: 'Movement cancelled. Doraemon stopped safely.',
-          time: timeStr,
-          launchResult: result,
-        },
-      ])
       setTimeout(() => { setLaunchState('idle'); setAvatarState('Idle') }, 3500)
+      return
+    }
+
+    if (taskResult.clarificationRequired) {
+      setLaunchState('awaiting_approval')
+      setAvatarState('Approval Required')
+      setIsChatboxOpen(true)
+      if (window.companionAPI?.setChatboxOpen) {
+        window.companionAPI.setChatboxOpen(true)
+      }
       return
     }
 
@@ -583,7 +710,7 @@ export default function App() {
     if (taskResult.success) {
       const isMock = taskResult.mode === 'mock' || taskResult.mockSimulated
       const verifiedText = taskResult.verified
-        ? 'Process verified running in Windows tasklist'
+        ? 'Process verified running'
         : isMock
         ? 'Simulated in mock mode'
         : 'Process started successfully'
@@ -593,7 +720,7 @@ export default function App() {
       const result: LaunchResult = {
         state: 'success',
         displayName: taskResult.displayName,
-        appId: intent.appId,
+        appId,
         realLaunch: !isMock,
         verified: taskResult.verified,
         targetInfo: taskResult.targetInfo,
@@ -605,51 +732,26 @@ export default function App() {
       setCurrentLaunchResult(result)
       setAvatarState('Success')
 
-      let successText = isMock
-        ? `[MOCK MODE] Simulated action for ${taskResult.displayName}.`
-        : `${taskResult.displayName} opened! Doraemon traveled across the desktop and launched the application.`
-      let spokenText = `${taskResult.displayName} opened successfully.`
-
-      if (intent.query) {
-        if (intent.actionType === 'play') {
-          successText = `Playing "${intent.query}" on ${taskResult.displayName}! Doraemon queued your request.`
-          spokenText = `Playing ${intent.query} on ${intent.displayName}`
-        } else {
-          successText = `Searching for "${intent.query}" on ${taskResult.displayName}!`
-          spokenText = `Searching for ${intent.query}`
-        }
-      }
-
-      voiceService.speakResponse(spokenText)
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          author: 'Companion',
-          text: successText,
-          time: timeStr,
-          launchResult: result,
-        },
-      ])
+      voiceService.speakResponse(`${taskResult.displayName} opened successfully.`)
       setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Completed', time: timeStr, launchResult: result }])
 
-      setTimeout(() => {
+      returnHomeTimerRef.current = setTimeout(() => {
+        isTaskActiveRef.current = false
         setLaunchState('idle')
         setAvatarState('Idle')
         setFacing('right')
         if (window.companionAPI?.returnHome) {
           window.companionAPI.returnHome()
         }
-      }, 4500)
+      }, 4000)
     } else {
-      const failureReason = taskResult.error ?? 'Launch verification timed out or process failed to start.'
+      const failureReason = taskResult.error ?? 'Destination not found or process failed to start.'
       updateProgressStage('launch_verified', 'failed', failureReason, 90)
 
       const result: LaunchResult = {
         state: 'failed',
         displayName: taskResult.displayName,
-        appId: intent.appId,
+        appId,
         realLaunch: taskResult.mode === 'real',
         errorMessage: failureReason,
         targetInfo: taskResult.targetInfo,
@@ -661,22 +763,16 @@ export default function App() {
       setAvatarState('Error')
       voiceService.speakResponse(`Could not open ${taskResult.displayName}.`)
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          author: 'Companion',
-          text: `Failed to open ${taskResult.displayName}: ${failureReason}`,
-          time: timeStr,
-          launchResult: result,
-        },
-      ])
       setTasks((prev) => [...prev, { id: Date.now() + 2, title: rawText, status: 'Failed', time: timeStr, launchResult: result }])
-      setTimeout(() => {
+      returnHomeTimerRef.current = setTimeout(() => {
+        isTaskActiveRef.current = false
         setLaunchState('idle')
         setAvatarState('Idle')
         setFacing('right')
-      }, 4500)
+        if (window.companionAPI?.returnHome) {
+          window.companionAPI.returnHome()
+        }
+      }, 4000)
     }
   }, [executionMode, isChatboxOpen, updateProgressStage])
 
@@ -891,20 +987,7 @@ export default function App() {
     }
   }
 
-  function endAvatarDrag(event: PointerEvent<HTMLDivElement>) {
-    if (avatarDragStart.current) {
-      const wasMoved = avatarDragStart.current.moved
-      try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ok */ }
-      avatarDragStart.current = null
-
-      if (!wasMoved) {
-        // Click on Doraemon avatar in floating window -> toggle Chatbox!
-        handleToggleFloatingChatbox()
-      }
-    }
-  }
-
-  const handleToggleFloatingChatbox = useCallback(() => {
+  function handleToggleFloatingChatbox() {
     if (isSleeping) {
       setIsSleeping(false)
       if (window.companionAPI) {
@@ -919,61 +1002,20 @@ export default function App() {
     if (window.companionAPI?.setChatboxOpen) {
       window.companionAPI.setChatboxOpen(next)
     }
-  }, [isChatboxOpen, isSleeping])
+  }
 
-  // ── Auto-Updater Actions ───────────────────────────────────────────────────
-  const handleRelaunch = useCallback(() => {
-    if (window.companionAPI?.relaunchApp) {
-      window.companionAPI.relaunchApp()
-    } else {
-      window.location.reload()
-    }
-  }, [])
+  function endAvatarDrag(event: PointerEvent<HTMLDivElement>) {
+    if (avatarDragStart.current) {
+      const wasMoved = avatarDragStart.current.moved
+      try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ok */ }
+      avatarDragStart.current = null
 
-  const handleApplyUpdate = useCallback(async () => {
-    if (!updateInfo) return
-    setIsUpdating(true)
-    setUpdateStatusMsg(`Downloading update v${updateInfo.remoteVersion} silently in background…`)
-    if (window.companionAPI?.applyUpdate) {
-      try {
-        const res = await window.companionAPI.applyUpdate(updateInfo)
-        setIsUpdating(false)
-        if (res.success) {
-          setIsUpdateReadyToRestart(true)
-          setUpdateStatusMsg('🎉 Update applied successfully! Restart companion to complete.')
-          voiceService.speakResponse('Companion updated successfully!')
-        } else {
-          setUpdateStatusMsg(`Auto-update failed: ${res.error || 'Extraction error'}`)
-        }
-      } catch (err) {
-        setIsUpdating(false)
-        setUpdateStatusMsg('Update error: ' + String(err))
+      if (!wasMoved) {
+        // Click on Doraemon avatar in floating window -> toggle Chatbox!
+        handleToggleFloatingChatbox()
       }
     }
-  }, [updateInfo])
-
-  const handleCheckUpdates = useCallback(async () => {
-    setUpdateStatusMsg('Checking GitHub for updates…')
-    if (window.companionAPI?.checkUpdates) {
-      try {
-        const info = await window.companionAPI.checkUpdates()
-        setUpdateInfo(info)
-        if (info.updateAvailable) {
-          setUpdateStatusMsg(`ℹ️ Update v${info.remoteVersion} is available! Click "Update Now" to apply.`)
-          voiceService.speakResponse('A new software update is available.')
-        } else if (info.error) {
-          setUpdateStatusMsg(info.error)
-        } else {
-          setUpdateStatusMsg(`You are on the latest version (v${info.currentVersion}).`)
-        }
-      } catch (err) {
-        setIsUpdating(false)
-        setUpdateStatusMsg('Could not check updates: ' + String(err))
-      }
-    } else {
-      setUpdateStatusMsg('Update service is active in desktop mode.')
-    }
-  }, [])
+  }
 
   // ── Send typed message ──────────────────────────────────────────────────────
   function sendMessage() {
@@ -987,7 +1029,8 @@ export default function App() {
     if (!text || isSleeping) return
     setMessage('')
 
-    if (isLaunchIntent(text)) {
+    const isGreeting = /^(hi|hello|hey|help|howdy|sup|greetings)\b/i.test(text)
+    if (isLaunchIntent(text) || !isGreeting) {
       handleLaunchApp(text)
       return
     }
@@ -1000,7 +1043,7 @@ export default function App() {
       {
         id: Date.now() + 1,
         author: 'Companion',
-        text: 'Request saved in this local session. No executable Windows application detected in command.',
+        text: 'Hello! I am Doraemon, your desktop companion. Type or say "Open <app or folder name>" (e.g. "Open Notepad" or "Open pokedex") and I will walk over and open it for you!',
         time: timeStr,
       },
     ])
@@ -1017,17 +1060,17 @@ export default function App() {
   if (viewMode === 'avatar') {
     return (
       <div
-        className="avatar-companion-desktop-root"
+        className={`avatar-companion-desktop-root ${isChatboxOpen ? 'chatbox-expanded' : 'compact-mode'}`}
         onPointerDown={beginAvatarDrag}
         onPointerMove={moveAvatarDrag}
         onPointerUp={endAvatarDrag}
         onPointerCancel={endAvatarDrag}
       >
         {!isChatboxOpen ? (
-          // Compact Floating Doraemon (240x300 bounds)
+          // Compact Floating Doraemon
           <div className="avatar-compact-stage" title="Click Doraemon to open Chatbox">
             <div className="avatar-image-wrapper">
-              <AvatarCharacter state={animState} size={170} facing={facing} />
+              <AvatarCharacter state={animState} size={AVATAR_CONFIG.characterWidth} facing={facing} />
             </div>
             {!isSleeping && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
@@ -1064,12 +1107,12 @@ export default function App() {
             )}
           </div>
         ) : (
-          // Expanded Avatar + Chatbox (660x540 bounds)
+          // Expanded Avatar + Chatbox
           <div className="avatar-chatbox-expanded-layout">
             {/* Doraemon on the LEFT side of the small chatbox */}
             <div className="avatar-compact-stage" title="Click Doraemon to collapse Chatbox">
               <div className="avatar-image-wrapper">
-                <AvatarCharacter state={animState} size={170} facing="right" />
+                <AvatarCharacter state={animState} size={AVATAR_CONFIG.characterWidth} facing="right" />
               </div>
             </div>
 
@@ -1078,9 +1121,9 @@ export default function App() {
               <div className="floating-chat-header">
                 <div className="floating-chat-brand">
                   <AvatarCharacter state={animState} size={28} facing="right" />
-                  <div>
+                  <div className="floating-chat-title-group">
                     <strong>OmniCompanion</strong>
-                    <span>{isVoiceRecording ? '🎤 Listening…' : currentAvatarState}</span>
+                    <span className="floating-status-badge">{isVoiceRecording ? '🎤 Listening…' : currentAvatarState}</span>
                   </div>
                 </div>
                 <div className="floating-chat-actions">
@@ -1098,6 +1141,7 @@ export default function App() {
                     type="button"
                     className="floating-action-btn"
                     onClick={() => {
+                      setActiveTab('Avatar Settings')
                       if (window.companionAPI?.openDashboard) window.companionAPI.openDashboard()
                     }}
                     title="Avatar Settings"
@@ -1140,24 +1184,41 @@ export default function App() {
                   messages.map((item) => (
                     <div
                       key={item.id}
+                      className={`floating-chat-bubble ${item.author === 'You' ? 'floating-chat-bubble-user' : 'floating-chat-bubble-companion'}`}
                       style={{
                         alignSelf: item.author === 'You' ? 'flex-end' : 'flex-start',
                         maxWidth: '85%',
-                        background: item.author === 'You' ? 'var(--mc-peach)' : 'white',
-                        border: '1px solid var(--mc-border)',
                         borderRadius: 12,
                         padding: '8px 12px',
                         fontSize: 13,
                         boxShadow: 'var(--mc-shadow-sm)',
+                        color: item.author === 'You' ? '#0369a1' : '#0f172a',
                       }}
                     >
                       <div>{item.text}</div>
+                      {item.matches && item.matches.length > 0 && (
+                        <div className="clarification-chip-list">
+                          {item.matches.map((m, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              className="clarification-chip-btn"
+                              onClick={() => {
+                                handleLaunchApp(m.name, m)
+                              }}
+                            >
+                              <span className="clarification-chip-name">{m.isFolder ? '📁 ' : '📄 '}{m.name}</span>
+                              <span className="clarification-chip-path">{m.path}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {item.launchResult && (
                         <div style={{ marginTop: 6 }}>
                           <LaunchBanner result={item.launchResult} onCancel={cancelActiveTask} />
                         </div>
                       )}
-                      <div style={{ fontSize: 9, color: 'var(--mc-text-subtle)', textAlign: 'right', marginTop: 4 }}>
+                      <div style={{ fontSize: 9, color: '#64748b', textAlign: 'right', marginTop: 4 }}>
                         {item.time}
                       </div>
                     </div>
@@ -1214,6 +1275,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
               {/* Composer */}
@@ -1233,10 +1295,16 @@ export default function App() {
                     rows={1}
                     style={{
                       flex: 1,
+                      background: '#ffffff',
+                      color: '#0f172a',
                       border: '1px solid var(--mc-border)',
                       borderRadius: 8,
-                      padding: '8px',
+                      padding: '8px 10px',
                       fontSize: 13,
+                      lineHeight: '1.4',
+                      height: 38,
+                      minHeight: 38,
+                      overflowY: 'hidden',
                       resize: 'none',
                       outline: 'none',
                     }}
@@ -1692,6 +1760,9 @@ export default function App() {
                     placeholder='Ask Doraemon or type a command like "Open Notepad" or "Open Calculator"…'
                     rows={1}
                     className="mc-composer-input"
+                    style={{
+                      color: '#0f172a',
+                    }}
                   />
                   <button
                     type="button"
