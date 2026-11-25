@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { CSSProperties } from 'react'
+import { AVATAR_CONFIG } from './avatarConfig'
 
 export type AvatarAnimState =
   | 'idle'
@@ -58,13 +59,12 @@ const TERTIARY_IMG = getAssetPath('doraemon/idle.webp')
  */
 export default function AvatarCharacter({
   state,
-  size = 160,
+  size = AVATAR_CONFIG.characterWidth,
   className,
   style,
   facing = 'right',
 }: AvatarCharacterProps) {
   const [imgSrc, setImgSrc] = useState(PRIMARY_IMG)
-  const [hasImageError, setHasImageError] = useState(false)
   const [walkFrameIdx, setWalkFrameIdx] = useState(0)
 
   const isWalking = state === 'walking' || state === 'running'
@@ -86,12 +86,9 @@ export default function AvatarCharacter({
 
   // Step through the 8 walking frames at natural anime pace (~105ms per frame, 75ms for running)
   useEffect(() => {
-    if (!isWalking) {
-      setWalkFrameIdx(0)
-      return
-    }
+    if (!isWalking) return
 
-    const intervalMs = isRunning ? 75 : 105
+    const intervalMs = isRunning ? 70 : 85
     const timer = setInterval(() => {
       setWalkFrameIdx((prev) => (prev + 1) % WALK_FRAMES.length)
     }, intervalMs)
@@ -286,83 +283,37 @@ export default function AvatarCharacter({
         style={{
           position: 'relative',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-end',
           justifyContent: 'center',
+          height: Math.round(size * 1.36),
           filter: filterStyle,
           transition: 'filter 0.3s ease',
         }}
       >
-        {hasImageError ? (
-          // Crisp vector SVG fallback if bitmap images fail to load in Electron sandbox
-          <svg
-            width={size}
-            height={size * 1.05}
-            viewBox="0 0 100 105"
-            style={{
-              display: 'block',
-              transform: facing === 'left' ? 'scaleX(-1)' : 'scaleX(1)',
-              transition: isWalking ? 'none' : 'transform 0.22s ease',
-            }}
-          >
-            {/* Doraemon Head */}
-            <circle cx="50" cy="46" r="42" fill="#0288D1" stroke="#01579B" strokeWidth="2" />
-            {/* White Face Inner Oval */}
-            <ellipse cx="50" cy="50" rx="34" ry="30" fill="#FFFFFF" />
-            {/* Eyes */}
-            <ellipse cx="43" cy="28" rx="7" ry="9" fill="#FFFFFF" stroke="#333" strokeWidth="1.2" />
-            <ellipse cx="57" cy="28" rx="7" ry="9" fill="#FFFFFF" stroke="#333" strokeWidth="1.2" />
-            {/* Pupils */}
-            <circle cx="45" cy="29" r="2.8" fill="#111" />
-            <circle cx="55" cy="29" r="2.8" fill="#111" />
-            {/* Nose */}
-            <circle cx="50" cy="38" r="5" fill="#E53935" stroke="#B71C1C" strokeWidth="1" />
-            <circle cx="48.5" cy="36.5" r="1.5" fill="#FFFFFF" opacity="0.8" />
-            {/* Philtrum line */}
-            <line x1="50" y1="43" x2="50" y2="60" stroke="#333" strokeWidth="1.5" />
-            {/* Mouth */}
-            <path d="M 30 52 Q 50 72 70 52" fill="none" stroke="#333" strokeWidth="1.8" strokeLinecap="round" />
-            {/* Whiskers */}
-            <line x1="22" y1="42" x2="38" y2="45" stroke="#333" strokeWidth="1.2" />
-            <line x1="20" y1="50" x2="37" y2="50" stroke="#333" strokeWidth="1.2" />
-            <line x1="23" y1="58" x2="38" y2="55" stroke="#333" strokeWidth="1.2" />
-            <line x1="78" y1="42" x2="62" y2="45" stroke="#333" strokeWidth="1.2" />
-            <line x1="80" y1="50" x2="63" y2="50" stroke="#333" strokeWidth="1.2" />
-            <line x1="77" y1="58" x2="62" y2="55" stroke="#333" strokeWidth="1.2" />
-            {/* Red Collar */}
-            <rect x="26" y="82" width="48" height="7" rx="3.5" fill="#E53935" stroke="#B71C1C" strokeWidth="1" />
-            {/* Yellow Bell */}
-            <circle cx="50" cy="89" r="5" fill="#FDD835" stroke="#F57F17" strokeWidth="1" />
-            <line x1="46" y1="88" x2="54" y2="88" stroke="#333" strokeWidth="0.8" />
-            <circle cx="50" cy="91" r="1.2" fill="#333" />
-          </svg>
-        ) : (
-          <img
-            src={currentDisplaySrc}
-            alt=""
-            draggable={false}
-            width={size}
-            onError={() => {
-              if (imgSrc === PRIMARY_IMG) {
-                setImgSrc(SECONDARY_IMG)
-              } else if (imgSrc === SECONDARY_IMG) {
-                setImgSrc(TERTIARY_IMG)
-              } else {
-                setHasImageError(true)
-              }
-            }}
-            className={`doraemon-character-img ${isWalking ? 'doraemon-walking-img' : 'doraemon-idle-breathing'} ${facing === 'left' ? 'doraemon-facing-left' : 'doraemon-facing-right'}`}
-            style={{
-              display: 'block',
-              width: size,
-              height: 'auto',
-              objectFit: 'contain',
-              pointerEvents: 'none',
-              userSelect: 'none',
-              transform: facing === 'left' ? 'scaleX(-1)' : 'scaleX(1)',
-              transition: isWalking ? 'none' : 'transform 0.22s ease',
-            }}
-          />
-        )}
+        <img
+          src={currentDisplaySrc}
+          alt={`Doraemon companion — ${state}`}
+          draggable={false}
+          width={size}
+          onError={() => {
+            if (imgSrc === PRIMARY_IMG) {
+              setImgSrc(SECONDARY_IMG)
+            } else if (imgSrc === SECONDARY_IMG) {
+              setImgSrc(TERTIARY_IMG)
+            }
+          }}
+          className={`doraemon-character-img ${isWalking ? 'doraemon-walking-img' : 'doraemon-idle-breathing'} ${facing === 'left' ? 'doraemon-facing-left' : 'doraemon-facing-right'}`}
+          style={{
+            display: 'block',
+            width: size,
+            height: 'auto',
+            objectFit: 'contain',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            transform: facing === 'left' ? 'scaleX(-1)' : 'scaleX(1)',
+            transition: isWalking ? 'none' : 'transform 0.22s ease',
+          }}
+        />
       </div>
     </div>
   )

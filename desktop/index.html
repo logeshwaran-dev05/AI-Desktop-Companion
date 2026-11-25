@@ -11,6 +11,13 @@
           var params = new URLSearchParams(window.location.search);
           if (params.get('view') === 'avatar' || window.location.hash === '#avatar') {
             document.documentElement.classList.add('avatar-window-mode');
+            if (document.body) {
+              document.body.classList.add('avatar-window-mode');
+            } else {
+              document.addEventListener('DOMContentLoaded', function() {
+                if (document.body) document.body.classList.add('avatar-window-mode');
+              });
+            }
           }
         } catch (e) {}
       })();

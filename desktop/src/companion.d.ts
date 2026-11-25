@@ -19,10 +19,12 @@ export interface TargetInfo {
 }
 
 export interface DesktopTaskResult extends IpcLaunchResult {
-  taskState: 'success' | 'failed' | 'cancelled';
+  taskState?: 'success' | 'failed' | 'cancelled';
   targetInfo?: TargetInfo;
-  executionMode: 'real' | 'mock';
+  executionMode?: 'real' | 'mock';
   cancelled?: boolean;
+  clarificationRequired?: boolean;
+  matches?: Array<{ name: string; path: string; directory: string; extension: string }>;
 }
 
 export interface MovementStep {
@@ -70,8 +72,18 @@ export interface CompanionAPI {
   moveAvatar?: (deltaX: number, deltaY: number) => Promise<boolean>;
   launchApp: (appId: string, options?: { query?: string }) => Promise<IpcLaunchResult>;
 
-  startDesktopTask: (data: { appId: string; displayName: string; query?: string }) => Promise<DesktopTaskResult>;
+  startDesktopTask: (data: {
+    appId?: string;
+    displayName?: string;
+    query?: string;
+    rawCommand?: string;
+    pathChoice?: string;
+    targetKind?: 'application' | 'file_or_folder' | 'auto';
+  }) => Promise<DesktopTaskResult>;
+  resolveDestination?: (query: string) => Promise<any>;
   cancelMovement: () => Promise<boolean>;
+  cancelTask?: () => Promise<boolean>;
+  cancelActiveMovement?: () => Promise<boolean>;
   returnHome: () => Promise<boolean>;
   setExecutionMode: (mode: 'real' | 'mock') => Promise<'real' | 'mock'>;
   getExecutionMode: () => Promise<'real' | 'mock'>;
