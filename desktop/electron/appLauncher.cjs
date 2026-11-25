@@ -12,6 +12,7 @@
  */
 
 const { exec } = require('child_process');
+const https = require('https');
 
 /**
  * Common Windows browser process names for truthful verification
@@ -595,6 +596,61 @@ function openBrowserUrl(url) {
  *   error?: string
  * }>}
  */
+/**
+ * Resolve the top playable YouTube watch URL from a search query so "play <song>"
+ * opens and auto-plays the video directly instead of stopping on search results.
+ * Falls back cleanly to fallbackUrl on timeout or parse miss.
+ */
+function resolveYouTubeTopVideoUrl(query, fallbackUrl) {
+  return new Promise((resolve) => {
+    const searchEndpoint = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    const req = https.get(
+      searchEndpoint,
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        timeout: 3500,
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          resolve(fallbackUrl);
+          return;
+        }
+        let body = '';
+        res.on('data', (chunk) => {
+          body += chunk;
+          // Early exit once we have enough HTML to find the first videoId
+          if (body.length > 250000) {
+            const match = body.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+            if (match && match[1]) {
+              res.destroy();
+              resolve(`https://www.youtube.com/watch?v=${match[1]}`);
+            }
+          }
+        });
+        res.on('end', () => {
+          const match = body.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+          if (match && match[1]) {
+            resolve(`https://www.youtube.com/watch?v=${match[1]}`);
+          } else {
+            resolve(fallbackUrl);
+          }
+        });
+      }
+    );
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(fallbackUrl);
+    });
+    req.on('error', () => {
+      resolve(fallbackUrl);
+    });
+  });
+}
+
 function launchApp(appId, options = {}) {
   return new Promise(async (resolve) => {
     const rawTarget = (appId || '').trim();
@@ -607,9 +663,13 @@ function launchApp(appId, options = {}) {
 
     // 2. Handle known Web-first apps (e.g. YouTube, Netflix, ChatGPT)
     if (appEntry && appEntry.type === 'web') {
-      const targetUrl = (options.query && appEntry.searchUrl)
+      let targetUrl = (options.query && appEntry.searchUrl)
         ? `${appEntry.searchUrl}${encodeURIComponent(options.query)}`
         : appEntry.webUrl;
+
+      if (appEntry.id === 'youtube' && options.query) {
+        targetUrl = await resolveYouTubeTopVideoUrl(options.query, targetUrl);
+      }
 
       console.log(`[Launcher] Opening web app ${appEntry.displayName}: ${targetUrl}`);
       await openBrowserUrl(targetUrl);
