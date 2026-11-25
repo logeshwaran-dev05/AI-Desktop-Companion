@@ -180,6 +180,21 @@ class WindowsAutomationExecutor:
             import urllib.parse
             if search_url and query:
                 final_url = f"{search_url}{urllib.parse.quote_plus(query)}"
+                if target_norm in ("youtube", "yt") and not (request.parameters or {}).get("search_only"):
+                    try:
+                        import re as _re
+                        import urllib.request as _req
+                        yt_req = _req.Request(
+                            final_url,
+                            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                        )
+                        with _req.urlopen(yt_req, timeout=3.0) as resp:
+                            html = resp.read(300000).decode("utf-8", errors="ignore")
+                            m = _re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', html)
+                            if m:
+                                final_url = f"https://www.youtube.com/watch?v={m.group(1)}"
+                    except Exception:
+                        pass
             elif web_url:
                 final_url = web_url
             else:
