@@ -3,11 +3,11 @@
   "releaseDate": "2026-11-24T17:00:50.062Z",
   "updatedAt": 1795539650064
 }
-  "version": "1.0.4",
+  "version": "1.0.5",
   "name": "JM Vertex AI Desktop Companion",
   "releaseDate": "2026-11-26",
   "downloadUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/payload.zip",
   "setupExeUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/JM-Vertex-AI-Companion-Setup.exe",
   "fallbackWebUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/",
-  "releaseNotes": "Always-on continuous voice mode (stays listening until turned off), interactive email drafting/pasting, loop downloads, and full multi-step AI workflows."
+  "releaseNotes": "Wired Desktop UI & Electron main process directly to multi-step Python human-activity orchestrator (auto-starts backend on port 8000, executes ChatGPT/Gemini prompting, email paste + recipient follow-up, and loop downloads)."
 }
