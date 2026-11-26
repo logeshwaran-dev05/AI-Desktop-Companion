@@ -162,14 +162,18 @@ class WindowsAutomationExecutor:
             )
 
         # Step 4: Handle web, navigation, and GUI primitive actions
-        if request.action_name == "search_web_app":
+        if request.action_name in ("search_web_app", "open_website", "search"):
             query = (request.parameters or {}).get("query", "")
-            profile_dir = (request.parameters or {}).get("profile_dir")
+            if request.action_name == "search" and not query:
+                query = request.target
+            target_app = (request.parameters or {}).get("platform") if request.action_name == "search" else request.target
+            target_app = target_app or request.target
+            profile_dir = (request.parameters or {}).get("profile_dir") or (request.parameters or {}).get("profile_directory")
             profile_name = (request.parameters or {}).get("profile_name")
             search_url = None
             web_url = None
             from ai_engine.catalogue import get_installed_apps
-            target_norm = request.target.lower().strip()
+            target_norm = target_app.lower().strip()
             for app_meta in get_installed_apps():
                 candidates = [app_meta["app_name"].lower(), app_meta["app_id"].lower(), *[a.lower() for a in app_meta.get("aliases", [])]]
                 if target_norm in candidates:
@@ -351,7 +355,7 @@ class WindowsAutomationExecutor:
                 diagnostics=diag,
             )
 
-        if request.action_name == "click_youtube_result":
+        if request.action_name in ("click_youtube_result", "play_video"):
             from windows_automation.gui_primitives import click_youtube_result, focus_window_by_title
             target_win = request.target or "YouTube"
             params = request.parameters or {}
@@ -364,15 +368,18 @@ class WindowsAutomationExecutor:
             else:
                 focus_window_by_title("YouTube") or focus_window_by_title("Chrome") or focus_window_by_title("Edge")
 
-            ordinal = params.get("ordinal_index", 1)
-            if not ordinal or ordinal == 1:
+            ordinal = params.get("ordinal_index")
+            if ordinal is None or (ordinal == 1 and str(request.target or "").lower().strip() not in ("", "youtube")):
                 target_str = str(request.target or "").lower().strip()
                 if target_str.isdigit():
-                    ordinal = int(target_str)
+                    # play_video uses 0-based target index ("0" -> 1st, "1" -> 2nd)
+                    ordinal = int(target_str) + 1 if request.action_name == "play_video" else int(target_str)
                 elif "2" in target_str or "second" in target_str:
                     ordinal = 2
                 elif "3" in target_str or "third" in target_str:
                     ordinal = 3
+                else:
+                    ordinal = 1
 
             if target_win and target_win not in {"active_window", ""}:
                 click_youtube_result(ordinal_index=int(ordinal), target=target_win)
@@ -396,14 +403,14 @@ class WindowsAutomationExecutor:
                 diagnostics=diag,
             )
 
-        if request.action_name in ("prompt_ai_chat", "human_prompt_ai"):
+        if request.action_name in ("prompt_ai_chat", "human_prompt_ai", "ask_prompt"):
             from windows_automation.gui_primitives import focus_window_by_title, clipboard_paste, type_text
-            target_ai = request.target or "ChatGPT"
+            target_ai = (request.parameters or {}).get("ai_app") or (request.target if request.action_name != "ask_prompt" else "ChatGPT")
             delay_before = float((request.parameters or {}).get("delay_before_type", 2.0))
             if delay_before > 0:
                 time.sleep(min(delay_before, 10.0))
             focus_window_by_title(target_ai)
-            prompt = (request.parameters or {}).get("prompt") or (request.parameters or {}).get("text", "")
+            prompt = (request.parameters or {}).get("prompt") or (request.parameters or {}).get("text") or (request.target if request.action_name == "ask_prompt" else "")
             press_enter = (request.parameters or {}).get("press_enter", True)
             use_clipboard = (request.parameters or {}).get("use_clipboard", True)
 

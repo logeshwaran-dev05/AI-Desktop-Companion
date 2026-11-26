@@ -188,6 +188,14 @@ INSTALLED_APPS = [
         "aliases": ["chatgpt", "chat gpt", "ai chat", "openai", "gpt"],
     },
     {
+        "app_name": "Google Gemini",
+        "app_id": "gemini",
+        "type": "web",
+        "category": "Productivity",
+        "web_url": "https://gemini.google.com",
+        "aliases": ["gemini", "google gemini", "bard", "google bard"],
+    },
+    {
         "app_name": "Claude",
         "app_id": "claude",
         "type": "web",
