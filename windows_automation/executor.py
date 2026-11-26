@@ -256,14 +256,22 @@ class WindowsAutomationExecutor:
         if request.action_name == "type_text":
             from windows_automation.gui_primitives import type_text, focus_window_by_title
             target_win = request.target
-            delay_before = float((request.parameters or {}).get("delay_before_type", 0.0))
+            params = request.parameters or {}
+            delay_val = params.get("delay_before_type")
+            if delay_val is not None:
+                delay_before = float(delay_val)
+            elif target_win and any(k in target_win.lower() for k in ("chatgpt", "gemini", "browser", "chrome", "edge")):
+                delay_before = float(params.get("delay_before_type", 1.5))
+            else:
+                delay_before = float(params.get("delay_before_type", 0.0))
+
             if delay_before > 0:
                 time.sleep(min(delay_before, 10.0))
             if target_win and target_win not in {"active_window", ""}:
                 focus_window_by_title(target_win)
-            text_to_type = (request.parameters or {}).get("text", "")
-            press_enter = (request.parameters or {}).get("press_enter", True)
-            type_delay = (request.parameters or {}).get("type_delay")
+            text_to_type = params.get("text", "")
+            press_enter = params.get("press_enter", True)
+            type_delay = params.get("type_delay")
             if type_delay is not None:
                 type_text(text_to_type, press_enter=press_enter, delay=float(type_delay))
             else:
@@ -308,12 +316,22 @@ class WindowsAutomationExecutor:
             )
 
         if request.action_name == "clipboard_paste":
-            from windows_automation.gui_primitives import clipboard_paste
-            delay_before = float((request.parameters or {}).get("delay_before_type", (request.parameters or {}).get("delay_before_paste", 0.0)))
+            from windows_automation.gui_primitives import clipboard_paste, focus_window_by_title
+            target_win = request.target
+            params = request.parameters or {}
+            delay_val = params.get("delay_before_type", params.get("delay_before_paste"))
+            if delay_val is not None:
+                delay_before = float(delay_val)
+            elif target_win and any(k in target_win.lower() for k in ("chatgpt", "gemini", "browser", "chrome", "edge")):
+                delay_before = float(params.get("delay_before_type", 1.5))
+            else:
+                delay_before = float(params.get("delay_before_type", 0.0))
+
             if delay_before > 0:
                 time.sleep(min(delay_before, 10.0))
-            text = (request.parameters or {}).get("text")
-            target_win = request.target
+            if target_win and target_win not in {"active_window", ""}:
+                focus_window_by_title(target_win)
+            text = params.get("text")
             clipboard_paste(target_app=target_win, text=text)
             evidence = VerificationEvidence(
                 verified=True,
@@ -334,11 +352,19 @@ class WindowsAutomationExecutor:
             )
 
         if request.action_name == "click_youtube_result":
-            from windows_automation.gui_primitives import click_youtube_result
-            delay_before = float((request.parameters or {}).get("delay_before_click", 1.5))
+            from windows_automation.gui_primitives import click_youtube_result, focus_window_by_title
+            target_win = request.target or "YouTube"
+            params = request.parameters or {}
+            delay_before = float(params.get("delay_before_click", 1.5))
             if delay_before > 0:
                 time.sleep(min(delay_before, 10.0))
-            ordinal = (request.parameters or {}).get("ordinal_index", 1)
+
+            if target_win and target_win not in {"active_window", ""}:
+                focus_window_by_title(target_win)
+            else:
+                focus_window_by_title("YouTube") or focus_window_by_title("Chrome") or focus_window_by_title("Edge")
+
+            ordinal = params.get("ordinal_index", 1)
             if not ordinal or ordinal == 1:
                 target_str = str(request.target or "").lower().strip()
                 if target_str.isdigit():
@@ -348,12 +374,15 @@ class WindowsAutomationExecutor:
                 elif "3" in target_str or "third" in target_str:
                     ordinal = 3
 
-            click_youtube_result(ordinal_index=int(ordinal))
+            if target_win and target_win not in {"active_window", ""}:
+                click_youtube_result(ordinal_index=int(ordinal), target=target_win)
+            else:
+                click_youtube_result(ordinal_index=int(ordinal))
             evidence = VerificationEvidence(
                 verified=True,
                 method="click_youtube_result",
                 verification_status="verified",
-                details={"ordinal_index": int(ordinal)},
+                details={"ordinal_index": int(ordinal), "target": target_win},
             )
             return ExecutionResult(
                 action_id=request.action_id,
