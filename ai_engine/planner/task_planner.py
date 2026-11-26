@@ -94,6 +94,7 @@ class TaskPlanner:
         steps: Optional[list[PlanStep]] = None,
         clarification_question: Optional[str] = None,
         parameters: Optional[dict] = None,
+        requires_clarification: Optional[bool] = None,
     ) -> PlannerResponse:
         """Create a consistent planner response."""
 
@@ -105,7 +106,9 @@ class TaskPlanner:
             ),
             steps=steps or [],
             requires_clarification=(
-                status == "clarification_required"
+                requires_clarification
+                if requires_clarification is not None
+                else (status == "clarification_required")
             ),
             clarification_question=clarification_question,
             status=status,
@@ -731,6 +734,10 @@ class TaskPlanner:
             dest_app = paste_match.group(1).strip()
             prompt = prompt[:paste_match.start()].strip()
 
+        is_email_task = bool(re.search(r"\b(e-?mail|mail|gmail)\b", prompt, re.IGNORECASE))
+        email_addr_match = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", prompt)
+        recipient_email = email_addr_match.group(0) if email_addr_match else None
+
         steps = [
             PlanStep(
                 step_id=1,
@@ -756,6 +763,9 @@ class TaskPlanner:
             ),
         ]
 
+        requires_clarification = False
+        clarification_question = None
+
         if dest_app:
             steps.append(
                 PlanStep(
@@ -777,14 +787,64 @@ class TaskPlanner:
                     parameters={},
                 )
             )
+        elif is_email_task:
+            steps.append(
+                PlanStep(
+                    step_id=3,
+                    action="capture_ai_response",
+                    target=ai_display,
+                    depends_on=[2],
+                    expected_outcome=f"Copy drafted email from {ai_display}.",
+                    parameters={"delay_before_capture": 6.0},
+                )
+            )
+            steps.append(
+                PlanStep(
+                    step_id=4,
+                    action="open_website",
+                    target="gmail",
+                    depends_on=[3],
+                    expected_outcome="Open Gmail to compose the email.",
+                    parameters={},
+                )
+            )
+            steps.append(
+                PlanStep(
+                    step_id=5,
+                    action="clipboard_paste",
+                    target="Gmail",
+                    depends_on=[4],
+                    expected_outcome="Paste drafted email body into Gmail.",
+                    parameters={"delay_before_paste": 2.0},
+                )
+            )
+            if recipient_email:
+                steps.append(
+                    PlanStep(
+                        step_id=6,
+                        action="compose_email",
+                        target=recipient_email,
+                        depends_on=[5],
+                        expected_outcome=f"Address email to {recipient_email}.",
+                        parameters={"to": recipient_email},
+                    )
+                )
+            else:
+                requires_clarification = True
+                clarification_question = (
+                    f"I've drafted the email with {ai_display}, copied it, and opened Gmail to paste it — "
+                    "to whom should I send this email? (Please provide the recipient's email address.)"
+                )
 
         return self._response(
             intent="multi_step",
             status="plan_ready",
             message=f"Multi-step {ai_display} prompt plan ready.",
             application=ai_display,
-            parameters={"prompt": prompt},
+            parameters={"prompt": prompt, **({"recipient": recipient_email} if recipient_email else {})},
             steps=steps,
+            requires_clarification=requires_clarification,
+            clarification_question=clarification_question,
         )
 
     def _try_open_and_type_plan(self, text: str) -> Optional[PlannerResponse]:
@@ -958,6 +1018,137 @@ class TaskPlanner:
                         expected_outcome=f"Open {full_url} in browser.",
                         parameters={"url": full_url},
                     )
+                ],
+            )
+
+        # 5. Loop / Batch Resource Downloads:
+        dl_match = re.match(
+            r"^(?:(?:please|can you|could you)\s+)?(?:loop\s+download|batch\s+download|download\s+all|download\s+resources?)\s*:?\s*(.*)$",
+            text,
+            re.IGNORECASE,
+        )
+        if dl_match:
+            raw_items = dl_match.group(1).strip().rstrip("?.!")
+            raw_items = re.sub(r"\s+(?:one by one|for me|automatically)$", "", raw_items, flags=re.IGNORECASE).strip()
+            if not raw_items or raw_items.lower() in ("files", "resources", "links", "them"):
+                return self._response(
+                    intent="batch_download",
+                    status="clarification_required",
+                    message="Download items or URLs are missing.",
+                    clarification_question="Which files, URLs, or resources would you like me to download in a loop?",
+                )
+            items = [i.strip() for i in re.split(r"[,;\n]+|\s+and\s+", raw_items) if i.strip()]
+            return self._response(
+                intent="batch_download",
+                status="plan_ready",
+                message=f"Loop download plan ready for {len(items)} resource(s).",
+                parameters={"items": items},
+                steps=[
+                    PlanStep(
+                        step_id=1,
+                        action="batch_download",
+                        target="Downloads",
+                        depends_on=[],
+                        expected_outcome=f"Loop through and download/open {len(items)} resource(s) into Downloads.",
+                        parameters={"items": items},
+                    )
+                ],
+            )
+
+        # 6. Standalone Email Composition: "send an email [to <addr>]" / "write an email"
+        email_match = re.match(
+            r"^(?:(?:please|can you|could you)\s+)?(?:send|write|compose|draft)\s+(?:an?\s+)?e-?mail(?:\s+to\s+(.+))?$",
+            text,
+            re.IGNORECASE,
+        )
+        if email_match:
+            recipient_part = (email_match.group(1) or "").strip()
+            addr_m = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", recipient_part)
+            if not addr_m:
+                return self._response(
+                    intent="compose_email",
+                    status="clarification_required",
+                    message="Recipient email address is needed.",
+                    application="Gmail",
+                    clarification_question="To whom should I send this email? (Please provide their email address and what you'd like it to say.)",
+                    steps=[
+                        PlanStep(
+                            step_id=1,
+                            action="open_website",
+                            target="gmail",
+                            depends_on=[],
+                            expected_outcome="Open Gmail while awaiting recipient details.",
+                            parameters={},
+                        )
+                    ],
+                )
+            to_addr = addr_m.group(0)
+            return self._response(
+                intent="compose_email",
+                status="plan_ready",
+                message=f"Email composition ready for {to_addr}.",
+                application="Gmail",
+                parameters={"to": to_addr},
+                steps=[
+                    PlanStep(
+                        step_id=1,
+                        action="open_website",
+                        target="gmail",
+                        depends_on=[],
+                        expected_outcome="Open Gmail.",
+                        parameters={},
+                    ),
+                    PlanStep(
+                        step_id=2,
+                        action="compose_email",
+                        target=to_addr,
+                        depends_on=[1],
+                        expected_outcome=f"Compose email to {to_addr}.",
+                        parameters={"to": to_addr},
+                    ),
+                ],
+            )
+
+        # 7. WhatsApp Messaging: "message <person> on whatsapp saying <msg>"
+        wa_match = re.match(
+            r"^(?:(?:please|can you|could you)\s+)?(?:message|text|send\s+(?:a\s+)?(?:whatsapp\s+)?message\s+to)\s+(.+?)\s+on\s+whatsapp(?:\s+(?:saying|that|:)\s+(.+))?$",
+            text,
+            re.IGNORECASE,
+        )
+        if wa_match:
+            person = wa_match.group(1).strip()
+            msg = (wa_match.group(2) or "").strip()
+            if not msg:
+                return self._response(
+                    intent="multi_step",
+                    status="clarification_required",
+                    message="WhatsApp message text is missing.",
+                    application="WhatsApp",
+                    clarification_question=f"What message would you like me to send to {person} on WhatsApp?",
+                )
+            return self._response(
+                intent="multi_step",
+                status="plan_ready",
+                message=f"WhatsApp message plan ready for {person}.",
+                application="WhatsApp",
+                parameters={"recipient": person, "text": msg},
+                steps=[
+                    PlanStep(
+                        step_id=1,
+                        action="open_application",
+                        target="whatsapp",
+                        depends_on=[],
+                        expected_outcome="Open WhatsApp.",
+                        parameters={},
+                    ),
+                    PlanStep(
+                        step_id=2,
+                        action="type_text",
+                        target="WhatsApp",
+                        depends_on=[1],
+                        expected_outcome=f"Type message to {person}.",
+                        parameters={"text": msg, "press_enter": True, "delay_before_type": 2.0},
+                    ),
                 ],
             )
 

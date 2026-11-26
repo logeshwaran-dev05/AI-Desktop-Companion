@@ -33,6 +33,9 @@ class WindowsActionPolicy:
         "search",
         "play_video",
         "ask_prompt",
+        "capture_ai_response",
+        "batch_download",
+        "compose_email",
     }
 
     # Forbidden shell execution tokens / dangerous argument patterns
@@ -133,7 +136,7 @@ class WindowsActionPolicy:
             )
 
         if not request.target or not request.target.strip():
-            if request.action_name in {"clipboard_copy", "wait", "type_text", "press_hotkey", "clipboard_paste", "click_youtube_result", "prompt_ai_chat", "open_website", "search", "play_video", "ask_prompt"}:
+            if request.action_name in {"clipboard_copy", "wait", "type_text", "press_hotkey", "clipboard_paste", "click_youtube_result", "prompt_ai_chat", "open_website", "search", "play_video", "ask_prompt", "capture_ai_response", "batch_download", "compose_email"}:
                 request.target = "active_window"
             else:
                 return False, "ERR_INVALID_REQUEST", "Target cannot be empty."
@@ -198,6 +201,9 @@ class WindowsActionPolicy:
             "search",
             "play_video",
             "ask_prompt",
+            "capture_ai_response",
+            "batch_download",
+            "compose_email",
         }:
             return True, None, None
 

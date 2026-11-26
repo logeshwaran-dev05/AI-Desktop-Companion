@@ -609,6 +609,58 @@ class TestTaskPlanner(unittest.TestCase):
         self.assertEqual(url_res.steps[0].action, "navigate_url")
         self.assertEqual(url_res.steps[0].target, "https://github.com")
 
+    def test_ask_gpt_email_drafts_pastes_and_asks_recipient(self):
+        response = self.planner.process_command(
+            CommandRequest(text="ask gpt to write an email to my manager")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "multi_step")
+        self.assertEqual(len(response.steps), 5)
+        self.assertEqual(
+            [s.action for s in response.steps],
+            ["open_website", "ask_prompt", "capture_ai_response", "open_website", "clipboard_paste"],
+        )
+        self.assertEqual(response.steps[3].target, "gmail")
+        self.assertTrue(response.requires_clarification)
+        self.assertIn("whom", (response.clarification_question or "").lower())
+
+    def test_ask_gpt_email_with_recipient_address(self):
+        response = self.planner.process_command(
+            CommandRequest(text="ask gpt to write an email to hr@company.com")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(len(response.steps), 6)
+        self.assertEqual(response.steps[5].action, "compose_email")
+        self.assertEqual(response.steps[5].target, "hr@company.com")
+        self.assertFalse(response.requires_clarification)
+
+    def test_loop_download_resources_and_clarification(self):
+        res_ok = self.planner.process_command(
+            CommandRequest(text="loop download https://example.com/a.pdf, https://example.com/b.pdf")
+        )
+        self.assertEqual(res_ok.status, "plan_ready")
+        self.assertEqual(res_ok.intent, "batch_download")
+        self.assertEqual(res_ok.steps[0].action, "batch_download")
+        self.assertEqual(len(res_ok.steps[0].parameters["items"]), 2)
+
+        res_missing = self.planner.process_command(CommandRequest(text="loop download"))
+        self.assertEqual(res_missing.status, "clarification_required")
+        self.assertTrue(res_missing.requires_clarification)
+
+    def test_whatsapp_messaging_and_clarification(self):
+        res_ok = self.planner.process_command(
+            CommandRequest(text="message Mom on whatsapp saying I reached safely")
+        )
+        self.assertEqual(res_ok.status, "plan_ready")
+        self.assertEqual(res_ok.steps[0].action, "open_application")
+        self.assertEqual(res_ok.steps[1].action, "type_text")
+        self.assertEqual(res_ok.steps[1].parameters["text"], "I reached safely")
+
+        res_missing = self.planner.process_command(
+            CommandRequest(text="message Mom on whatsapp")
+        )
+        self.assertEqual(res_missing.status, "clarification_required")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -167,7 +167,7 @@ def press_hotkey(*keys: str) -> None:
     if not user32:
         return
 
-    vk_list = [VK_CODES.get(k.lower(), ord(k.upper())) for k in keys]
+    vk_list = [VK_CODES[k.lower()] if k.lower() in VK_CODES else ord(k.upper()[0]) for k in keys]
 
     # Key down all
     for vk in vk_list:

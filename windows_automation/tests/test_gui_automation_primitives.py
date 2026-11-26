@@ -147,6 +147,36 @@ class TestGuiAutomationPrimitives(unittest.TestCase):
             mock_focus.assert_called_once_with("ChatGPT")
             mock_paste.assert_called_once_with(target_app="ChatGPT", text="write an email to my manager")
 
+    def test_capture_ai_response_action(self):
+        req = ActionRequest(
+            action_id="act-cap-1",
+            task_id="task-1",
+            action_name="capture_ai_response",
+            target="ChatGPT",
+            parameters={"delay_before_capture": 0.0},
+        )
+        with patch("windows_automation.gui_primitives.focus_window_by_title", return_value=True), \
+             patch("windows_automation.gui_primitives.press_hotkey") as mock_hk, \
+             patch("windows_automation.gui_primitives.get_clipboard_text", return_value="Dear Manager, ..."):
+            res = self.executor.execute(req)
+            self.assertEqual(res.status, "completed")
+            self.assertEqual(res.verification.details["captured_text"], "Dear Manager, ...")
+            mock_hk.assert_called_once_with("ctrl", "shift", "c")
+
+    def test_batch_download_action(self):
+        req = ActionRequest(
+            action_id="act-dl-1",
+            task_id="task-1",
+            action_name="batch_download",
+            target="Downloads",
+            parameters={"items": ["python cheatsheet", "react docs"]},
+        )
+        with patch.object(self.executor, "_open_url") as mock_open:
+            res = self.executor.execute(req)
+            self.assertEqual(res.status, "completed")
+            self.assertEqual(res.verification.details["downloaded_count"], 2)
+            self.assertEqual(mock_open.call_count, 2)
+
 
     def test_type_text_with_delay_before_type_and_focus(self):
         req = ActionRequest(
