@@ -806,21 +806,37 @@ export default function App() {
         latestSpeechRef.current = text
         clearVoiceAutoEndTimer()
 
-        if (isFinal) {
-          voiceService.stopListening()
-          setIsVoiceRecording(false)
-          setAudioLevel(0)
+        const dispatchVoiceCommand = (rawCmd: string) => {
+          const cmd = rawCmd.trim()
+          if (!cmd) return
+
+          // Allow hands-free voice command to turn off the always-on mic intentionally
+          if (/^(stop listening|turn off mic|mute mic|mic off|go to sleep)$/i.test(cmd)) {
+            voiceService.stopListening()
+            setIsVoiceRecording(false)
+            setAudioLevel(0)
+            setVoiceTranscript('')
+            setMessage('')
+            latestSpeechRef.current = ''
+            setAvatarState('Idle')
+            return
+          }
+
+          // Keep mic ON continuously for the next voice command!
+          latestSpeechRef.current = ''
+          setVoiceTranscript('')
+          setMessage('')
           setAvatarState('Thinking')
-          handleLaunchApp(text)
+          handleLaunchApp(cmd)
+        }
+
+        if (isFinal) {
+          dispatchVoiceCommand(text)
         } else {
           voiceAutoEndTimerRef.current = setTimeout(() => {
             const finalCmd = latestSpeechRef.current.trim()
             if (finalCmd) {
-              voiceService.stopListening()
-              setIsVoiceRecording(false)
-              setAudioLevel(0)
-              setAvatarState('Thinking')
-              handleLaunchApp(finalCmd)
+              dispatchVoiceCommand(finalCmd)
             }
           }, 1300)
         }
@@ -834,7 +850,7 @@ export default function App() {
       onError: (err) => {
         clearVoiceAutoEndTimer()
         if (err.type === 'network') {
-          setNotice('🎤 Microphone listening... Speak your command.')
+          setNotice('🎤 Always-on microphone listening... Speak your command.')
           setAvatarState('Listening')
         } else {
           setVoiceError(err.message)
@@ -843,17 +859,10 @@ export default function App() {
         }
       },
       onEnd: () => {
-        if (window.companionAPI?.isElectron) return
         clearVoiceAutoEndTimer()
         setIsVoiceRecording(false)
         setAudioLevel(0)
-        const pending = latestSpeechRef.current.trim()
-        if (pending && launchState === 'idle') {
-          setAvatarState('Thinking')
-          handleLaunchApp(pending)
-        } else {
-          setAvatarState((prev) => (prev === 'Listening' ? 'Idle' : prev))
-        }
+        setAvatarState((prev) => (prev === 'Listening' ? 'Idle' : prev))
       },
     })
 
@@ -1021,9 +1030,9 @@ export default function App() {
   function sendMessage() {
     clearVoiceAutoEndTimer()
     if (isVoiceRecording) {
-      voiceService.stopListening()
-      setIsVoiceRecording(false)
-      setAudioLevel(0)
+      // Keep always-on mic active; just reset pending speech buffer
+      latestSpeechRef.current = ''
+      setVoiceTranscript('')
     }
     const text = message.trim()
     if (!text || isSleeping) return

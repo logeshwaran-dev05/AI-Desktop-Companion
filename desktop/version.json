@@ -3,11 +3,11 @@
   "releaseDate": "2026-11-24T17:00:50.062Z",
   "updatedAt": 1795539650064
 }
-  "version": "1.0.3",
+  "version": "1.0.4",
   "name": "JM Vertex AI Desktop Companion",
-  "releaseDate": "2026-11-25",
+  "releaseDate": "2026-11-26",
   "downloadUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/payload.zip",
   "setupExeUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/JM-Vertex-AI-Companion-Setup.exe",
   "fallbackWebUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/",
-  "releaseNotes": "Direct YouTube song playback (resolves & auto-plays top video instead of stopping on search results), plus enhanced Win32 GUI primitives."
+  "releaseNotes": "Always-on continuous voice mode (stays listening until turned off), interactive email drafting/pasting, loop downloads, and full multi-step AI workflows."
 }
