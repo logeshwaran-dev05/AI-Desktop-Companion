@@ -370,6 +370,8 @@ class TaskPlanner:
         text = " ".join(
             (request.text or "").strip().split()
         )
+        # Normalize common fast-typing typos ("adn" -> "and", "nad" -> "and")
+        text = re.sub(r"\b(?:adn|nad)\b", "and", text, flags=re.IGNORECASE)
 
         # 1. Empty input.
         if not text:
@@ -758,7 +760,7 @@ class TaskPlanner:
                     "text": prompt,
                     "ai_app": ai_display,
                     "press_enter": True,
-                    "delay_before_type": 2.0,
+                    "delay_before_type": 3.0,
                 },
             ),
         ]

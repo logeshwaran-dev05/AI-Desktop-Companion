@@ -622,7 +622,7 @@ export default function App() {
 
     const isHumanActivityCmd =
       !specificChoice &&
-      /\b(ask|tell|prompt|loop\s+download|batch\s+download|download\s+all|copy|paste|press|hit|message|e-?mail|mail|go\s+to|visit)\b|\band\s+(?:type|write|enter|ask|click|play|paste)\b|^[\w.+-]+@[\w-]+\.[\w.-]+$/i.test(
+      /\b(type|write|ask|tell|prompt|download|loop\s+download|batch\s+download|copy|paste|press|hit|message|e-?mail|mail|go\s+to|visit|compose|draft)\b|\b(and|adn|nad)\s+(?:type|write|enter|ask|click|play|paste|search)\b|^[\w.+-]+@[\w-]+\.[\w.-]+$/i.test(
         rawText.trim()
       )
 

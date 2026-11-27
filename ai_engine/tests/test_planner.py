@@ -668,6 +668,14 @@ class TestTaskPlanner(unittest.TestCase):
         self.assertEqual(res.steps[0].target, "youtube")
         self.assertEqual(res.steps[0].parameters["query"], "believer song")
 
+    def test_open_notepad_adn_typo(self):
+        res = self.planner.process_command(CommandRequest(text="open notepad adn type hi"))
+        self.assertEqual(res.status, "plan_ready")
+        self.assertEqual(res.intent, "multi_step")
+        self.assertEqual(res.steps[0].action, "open_application")
+        self.assertEqual(res.steps[1].action, "type_text")
+        self.assertEqual(res.steps[1].parameters["text"], "hi")
+
 
 if __name__ == "__main__":
     unittest.main()

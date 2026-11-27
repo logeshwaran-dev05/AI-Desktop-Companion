@@ -140,12 +140,14 @@ class TestGuiAutomationPrimitives(unittest.TestCase):
             }
         )
         with patch("windows_automation.gui_primitives.focus_window_by_title", return_value=True) as mock_focus, \
-             patch("windows_automation.gui_primitives.clipboard_paste", return_value=True) as mock_paste:
+             patch("windows_automation.gui_primitives.clipboard_paste", return_value=True) as mock_paste, \
+             patch("windows_automation.gui_primitives.press_vk_key") as mock_vk:
             res = self.executor.execute(req)
             self.assertEqual(res.status, "completed")
             self.assertEqual(res.verification_status, "verified")
             mock_focus.assert_called_once_with("ChatGPT")
             mock_paste.assert_called_once_with(target_app="ChatGPT", text="write an email to my manager")
+            mock_vk.assert_called_once()
 
     def test_capture_ai_response_action(self):
         req = ActionRequest(
@@ -153,15 +155,17 @@ class TestGuiAutomationPrimitives(unittest.TestCase):
             task_id="task-1",
             action_name="capture_ai_response",
             target="ChatGPT",
-            parameters={"delay_before_capture": 0.0},
+            parameters={"delay_before_capture": 0.0, "prompt_sent": "write email"},
         )
         with patch("windows_automation.gui_primitives.focus_window_by_title", return_value=True), \
              patch("windows_automation.gui_primitives.press_hotkey") as mock_hk, \
-             patch("windows_automation.gui_primitives.get_clipboard_text", return_value="Dear Manager, ..."):
+             patch("windows_automation.gui_primitives.set_clipboard_text") as mock_set, \
+             patch("windows_automation.gui_primitives.get_clipboard_text", return_value="write email\nDear Manager, ..."):
             res = self.executor.execute(req)
             self.assertEqual(res.status, "completed")
             self.assertEqual(res.verification.details["captured_text"], "Dear Manager, ...")
-            mock_hk.assert_called_once_with("ctrl", "shift", "c")
+            self.assertEqual(mock_hk.call_count, 2)
+            mock_set.assert_called_once_with("Dear Manager, ...")
 
     def test_batch_download_action(self):
         req = ActionRequest(

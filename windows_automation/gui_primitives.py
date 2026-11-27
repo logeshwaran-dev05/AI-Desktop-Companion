@@ -150,11 +150,11 @@ def type_text(text: str, press_enter: bool = True, delay: float = 0.01) -> None:
     to guarantee 100% exact character fidelity on Windows 11 WinUI apps (Notepad, etc.),
     falling back to SendInput Unicode events.
     """
-    if delay > 0 and len(text) > 2 and set_clipboard_text(text):
-        time.sleep(0.05)
+    if delay > 0 and len(text) > 0 and set_clipboard_text(text):
+        time.sleep(0.08)
         press_hotkey("ctrl", "v")
         if press_enter:
-            time.sleep(0.05)
+            time.sleep(0.35)
             press_vk_key(VK_CODES["enter"])
         return
 

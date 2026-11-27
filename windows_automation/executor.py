@@ -201,6 +201,14 @@ class WindowsAutomationExecutor:
                         pass
             elif web_url:
                 final_url = web_url
+                if target_norm in ("gmail", "mail", "google mail"):
+                    body_txt = (request.parameters or {}).get("text") or ""
+                    to_txt = (request.parameters or {}).get("to") or ""
+                    if body_txt or to_txt:
+                        qs = urllib.parse.urlencode(
+                            {k: v for k, v in (("view", "cm"), ("fs", "1"), ("to", to_txt), ("body", body_txt)) if v}
+                        )
+                        final_url = f"https://mail.google.com/mail/?{qs}"
             else:
                 final_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query or request.target)}"
 
@@ -417,9 +425,9 @@ class WindowsAutomationExecutor:
             if use_clipboard and prompt:
                 clipboard_paste(target_app=target_ai, text=prompt)
                 if press_enter:
-                    from windows_automation.gui_primitives import press_hotkey
-                    time.sleep(0.1)
-                    press_hotkey("enter")
+                    from windows_automation.gui_primitives import press_vk_key, VK_CODES
+                    time.sleep(0.4)
+                    press_vk_key(VK_CODES["enter"])
             elif prompt:
                 type_text(prompt, press_enter=press_enter)
 
@@ -427,7 +435,7 @@ class WindowsAutomationExecutor:
                 verified=True,
                 method="prompt_ai_chat",
                 verification_status="verified",
-                details={"target": target_ai, "prompt_length": len(prompt), "submitted": press_enter},
+                details={"target": target_ai, "prompt_length": len(prompt), "submitted": press_enter, "prompt_sent": prompt},
             )
             return ExecutionResult(
                 action_id=request.action_id,
@@ -442,19 +450,29 @@ class WindowsAutomationExecutor:
             )
 
         if request.action_name == "capture_ai_response":
-            from windows_automation.gui_primitives import focus_window_by_title, press_hotkey, get_clipboard_text
+            from windows_automation.gui_primitives import focus_window_by_title, press_hotkey, get_clipboard_text, set_clipboard_text
             target_ai = request.target or "ChatGPT"
-            delay_before = float((request.parameters or {}).get("delay_before_capture", 5.0))
+            delay_before = float((request.parameters or {}).get("delay_before_capture", 8.0))
             if delay_before > 0:
-                time.sleep(min(delay_before, 10.0))
+                time.sleep(min(delay_before, 15.0))
             focus_window_by_title(target_ai)
-            # Copy latest AI response (Ctrl+Shift+C copies last response in ChatGPT; fallback Ctrl+C)
-            if "chatgpt" in target_ai.lower():
-                press_hotkey("ctrl", "shift", "c")
-            else:
-                press_hotkey("ctrl", "c")
+            time.sleep(0.2)
+            # Use Ctrl+A -> Ctrl+C to avoid Chrome's Ctrl+Shift+C DevTools Inspector shortcut
+            press_hotkey("ctrl", "a")
             time.sleep(0.15)
-            captured_text = get_clipboard_text() or ""
+            press_hotkey("ctrl", "c")
+            time.sleep(0.2)
+            raw_copied = get_clipboard_text() or ""
+            # Extract generated reply after the user's prompt and strip trailing ChatGPT/Gemini UI chrome
+            prompt_sent = (request.parameters or {}).get("prompt_sent") or (request.parameters or {}).get("prompt") or ""
+            captured_text = raw_copied.strip()
+            if prompt_sent and prompt_sent in captured_text:
+                captured_text = captured_text.split(prompt_sent, 1)[-1].strip()
+            for footer_marker in ("ChatGPT can make mistakes", "Ask anything", "Gemini can make mistakes"):
+                if footer_marker in captured_text:
+                    captured_text = captured_text.split(footer_marker, 1)[0].strip()
+            if captured_text:
+                set_clipboard_text(captured_text)
             evidence = VerificationEvidence(
                 verified=True,
                 method="capture_ai_response",

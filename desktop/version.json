@@ -4,11 +4,11 @@
   "releaseDate": "2026-11-24T17:00:50.062Z",
   "updatedAt": 1795539650064
 }
-  "version": "1.0.8",
+  "version": "1.0.9",
   "name": "JM Vertex AI Desktop Companion",
   "releaseDate": "2026-11-27",
   "downloadUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/payload.zip",
   "setupExeUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/JM-Vertex-AI-Companion-Setup.exe",
   "fallbackWebUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/",
-  "releaseNotes": "Merged all teammate backend & Doraemon frontend PRs (#14 & #15), fixed orchestrator/API merge bugs, added Windows 11 Notepad class focus + backend warmup retry + creative auto-typing."
+  "releaseNotes": "Removed Chrome DevTools Ctrl+Shift+C capture bug, fixed ChatGPT Enter submit timing, opens Gmail Compose pre-filled with captured draft, handles 'adn' typos, and supports 1-2 char Unicode paste (e.g. 'hi')."
 }
