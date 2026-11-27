@@ -276,6 +276,24 @@ def focus_window_by_title(title_substring: str) -> bool:
         return target_hwnd
 
     found_hwnd = _find_hwnd(title_substring)
+    if not found_hwnd and title_substring.lower() == "notepad":
+        # Windows 11 Notepad tabs often have title "Untitled" without "- Notepad"; match Win32 class "Notepad"
+        class_hwnd = None
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def enum_notepad_class(hwnd, _lparam):
+            nonlocal class_hwnd
+            if user32.IsWindowVisible(hwnd):
+                cls_buf = ctypes.create_unicode_buffer(64)
+                user32.GetClassNameW(hwnd, cls_buf, 64)
+                if cls_buf.value.lower() == "notepad":
+                    class_hwnd = hwnd
+                    return False
+            return True
+
+        user32.EnumWindows(enum_notepad_class, 0)
+        found_hwnd = class_hwnd or _find_hwnd("Untitled")
+
     if not found_hwnd and title_substring.lower() in ("chatgpt", "gemini", "youtube", "claude"):
         # Fallback to browser window if web app is open in an existing Chrome/Edge tab
         for browser_needle in ("Chrome", "Edge", "Brave"):

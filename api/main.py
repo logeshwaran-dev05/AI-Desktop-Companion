@@ -80,6 +80,8 @@ def get_browser_profiles(browser: str = "chrome") -> List[dict]:
     from windows_automation.browser_profiles import get_browser_profiles as _g
     return _g(browser)
 
+@app.get("/api/browser/profiles")
+@app.get("/browser/profiles")
 def get_browser_profiles_endpoint():
     """Return discovered Chrome browser profiles."""
     try:
@@ -251,6 +253,8 @@ def get_browser_profiles(browser: str = "chrome") -> List[dict]:
     from windows_automation.browser_profiles import get_browser_profiles as _g
     return _g(browser)
 
+@app.get("/api/browser/profiles")
+@app.get("/browser/profiles")
 def get_browser_profiles_endpoint():
     """Return discovered Chrome browser profiles."""
     try:

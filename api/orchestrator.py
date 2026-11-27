@@ -401,6 +401,8 @@ class PermissionEvaluator:
         "type_text",
         "clipboard_copy",
         "clipboard_paste",
+        "copy_text",
+        "paste_text",
         "click_youtube_result",
         "capture_ai_response",
         "batch_download",
@@ -420,8 +422,6 @@ class PermissionEvaluator:
         clean_target = (target or "").strip().lower()
         clean_target_base = clean_target[4:] if clean_target.startswith("app_") else clean_target
 
-        # Check supported actions (including extended actions for approved plans)
-        if clean_action not in ("open_application", "search_web_app", "type_text", "click_youtube_result"):
         # Check supported actions
         if clean_action != "open_application" and clean_action not in self.HUMAN_ACTIVITY_ACTIONS:
             return AuthorizationDecision(
@@ -745,7 +745,7 @@ class TaskOrchestrator:
                     "action": step.action,
                     "target": step.target,
                     "depends_on": getattr(step, "depends_on", []),
-                    "expected_outcome": step.expected_outcome,
+                    "expected_outcome": getattr(step, "expected_outcome", ""),
                     "parameters": getattr(step, "parameters", {}),
                 }
                 for step in plan_response.steps
@@ -1017,11 +1017,11 @@ class TaskOrchestrator:
             task["requires_clarification"] = True
             task["clarification_question"] = plan_response.clarification_question
             task["message"] = plan_response.clarification_question
-            self.state_machine.transition(task, "launched", plan_response.clarification_question)
+            self.state_machine.transition(task, "completed", plan_response.clarification_question)
         else:
             msg = f"Completed {len(steps_list)}-step human-activity workflow."
             task["message"] = msg
-            self.state_machine.transition(task, "launched", msg)
+            self.state_machine.transition(task, "completed", msg)
 
         task["error_code"] = None
         task["error_message"] = None
@@ -1063,7 +1063,7 @@ class TaskOrchestrator:
                     "action": step.action,
                     "target": step.target,
                     "depends_on": getattr(step, "depends_on", []),
-                    "expected_outcome": step.expected_outcome,
+                    "expected_outcome": getattr(step, "expected_outcome", ""),
                     "parameters": getattr(step, "parameters", {}),
                 }
                 for step in plan_response.steps

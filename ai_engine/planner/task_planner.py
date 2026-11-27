@@ -859,6 +859,18 @@ class TaskPlanner:
 
         app_query = m.group(1).strip()
         content = m.group(2).strip()
+        # Handle creative/meta requests like "type a few lines on your own" / "write something"
+        if re.match(
+            r"^(?:an?\s+)?(?:few\s+lines|something|anything|a\s+(?:short\s+)?note|some\s+text)(?:\s+(?:on\s+yo?ur\s+own|for\s+me|yourself))?$",
+            content,
+            re.IGNORECASE,
+        ):
+            content = (
+                "Hello from OmniCompanion!\n"
+                "Your AI Desktop Companion is ready to help with your daily tasks.\n"
+                "Have a productive and awesome day!"
+            )
+
         res_status, record, _ = self._resolve_application(app_query)
         if res_status != "resolved" or record is None:
             return None

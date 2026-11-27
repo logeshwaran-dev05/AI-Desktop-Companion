@@ -631,15 +631,25 @@ export default function App() {
         const normalizedCmd = /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(rawText.trim())
           ? `send an email to ${rawText.trim()}`
           : rawText.trim()
-        const backendResp = await fetch('http://127.0.0.1:8000/tasks/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: normalizedCmd,
-            auto_approve: true,
-            timeout_seconds: 30,
-          }),
-        })
+        const fetchBackend = async () => {
+          return fetch('http://127.0.0.1:8000/tasks/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: normalizedCmd,
+              auto_approve: true,
+              timeout_seconds: 30,
+            }),
+          })
+        }
+        let backendResp: Response
+        try {
+          backendResp = await fetchBackend()
+        } catch {
+          // Wait briefly in case uvicorn is still warming up after launch
+          await new Promise((r) => setTimeout(r, 1500))
+          backendResp = await fetchBackend()
+        }
         if (backendResp.ok) {
           const data = await backendResp.json()
           if (data && (data.status === 'completed' || data.requires_clarification)) {
@@ -684,10 +694,9 @@ export default function App() {
         taskResult = await window.companionAPI.startDesktopTask({
           appId,
           displayName,
-          query,
+          query: query || intent?.query,
           actionType,
           rawCommand,
-          query: intent?.query,
           pathChoice: specificChoice?.path,
           targetKind,
         })

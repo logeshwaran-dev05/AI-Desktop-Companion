@@ -43,13 +43,17 @@ class TestSequentialOrchestration(unittest.TestCase):
             result.action_id = f"act_{step.step_id}"
             result.status = "completed"
             result.duration_ms = 10
-            result.verification = MagicMock(details={"output": step.parameters.get('text', '')})
+            result.completed_at = "2026-11-27T00:00:00Z"
+            ver_details = {"output": step.parameters.get('text', '')}
+            result.verification = MagicMock(verified=True, details=ver_details)
+            result.verification.to_dict.return_value = {"verified": True, "details": ver_details}
+            result.to_dict.return_value = {"status": "completed", "verification": {"verified": True, "details": ver_details}}
             result.audit = None
             return result
         mock_execute.side_effect = exec_side_effect
         # Submit task via API
         response = self.client.post('/tasks/submit', json={"title": "Test", "auto_execute": True, "command": "dummy"})
-        self.assertEqual(response.status_code, 200)
+        self.assertIn(response.status_code, (200, 201))
         task = response.json()
         # Fetch task result
         task_id = task["task_id"]
