@@ -70,12 +70,13 @@ export interface CompanionAPI {
   onSyncState: (callback: (data: CompanionSyncData) => void) => () => void;
   sendSyncState: (data: CompanionSyncData) => Promise<boolean>;
   moveAvatar?: (deltaX: number, deltaY: number) => Promise<boolean>;
-  launchApp: (appId: string, options?: { query?: string }) => Promise<IpcLaunchResult>;
+  launchApp: (appId: string, options?: { query?: string; actionType?: 'open' | 'play' | 'search' }) => Promise<IpcLaunchResult>;
 
   startDesktopTask: (data: {
     appId?: string;
     displayName?: string;
     query?: string;
+    actionType?: 'open' | 'play' | 'search';
     rawCommand?: string;
     pathChoice?: string;
     targetKind?: 'application' | 'file_or_folder' | 'auto';

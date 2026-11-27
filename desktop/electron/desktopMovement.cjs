@@ -18,6 +18,25 @@ let activeMovement = null;
 let homePosition = null;
 
 /**
+ * Safely resolves current work area with fallback for testing environments outside Electron
+ * @param {{ x: number, y: number }} [point]
+ * @returns {{ x: number, y: number, width: number, height: number }}
+ */
+function getWorkArea(point) {
+  try {
+    if (screen && typeof screen.getDisplayNearestPoint === 'function' && point) {
+      const display = screen.getDisplayNearestPoint(point);
+      if (display && display.workArea) return display.workArea;
+    }
+    if (screen && typeof screen.getPrimaryDisplay === 'function') {
+      const primary = screen.getPrimaryDisplay();
+      if (primary && primary.workArea) return primary.workArea;
+    }
+  } catch {}
+  return { x: 0, y: 0, width: 1920, height: 1040 };
+}
+
+/**
  * Calculates cubic ease-in-out interpolation factor
  * @param {number} t - Progress between 0 and 1
  * @returns {number}
@@ -32,11 +51,9 @@ function easeInOutCubic(t) {
  * @returns {{ x: number, y: number }}
  */
 function getHomePosition(window) {
-  if (homePosition) return homePosition;
-
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const workArea = primaryDisplay.workArea;
-  const [width, height] = window.getSize();
+  const [startX, startY] = (window && typeof window.getPosition === 'function') ? window.getPosition() : [0, 0];
+  const workArea = getWorkArea({ x: startX, y: startY });
+  const [width, height] = (window && typeof window.getSize === 'function') ? window.getSize() : [196, 200];
 
   homePosition = {
     x: Math.max(0, Math.round(workArea.x + workArea.width - width - 24)),
@@ -55,6 +72,9 @@ function cancelActiveMovement() {
       clearInterval(activeMovement.timer);
     }
     activeMovement.cancelled = true;
+    if (typeof activeMovement.onCancel === 'function') {
+      activeMovement.onCancel();
+    }
     activeMovement = null;
   }
 }
@@ -81,8 +101,7 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
     cancelActiveMovement();
 
     const [startX, startY] = avatarWindow.getPosition();
-    const primaryDisplay = screen.getDisplayNearestPoint({ x: startX, y: startY });
-    const workArea = primaryDisplay.workArea;
+    const workArea = getWorkArea({ x: startX, y: startY });
     const [winWidth, winHeight] = avatarWindow.getSize();
 
     // Clamp destination to visible desktop boundaries
@@ -100,7 +119,7 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
     }
 
     // Derive facing direction from horizontal travel
-    const facing = deltaX < 0 ? 'left' : 'right';
+    const facing = options.facing || (deltaX < 0 ? 'left' : 'right');
 
     // Calculate duration based on distance (minimum 2400ms, maximum 3800ms for smooth pacing)
     const duration = options.durationMs || Math.min(3800, Math.max(2400, Math.round(distance * 3.2)));
@@ -112,6 +131,13 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
     const movementRecord = {
       cancelled: false,
       timer: null,
+      onCancel: () => {
+        resolve({
+          completed: false,
+          cancelled: true,
+          finalPos: avatarWindow.isDestroyed() ? { x: 0, y: 0 } : { x: avatarWindow.getPosition()[0], y: avatarWindow.getPosition()[1] },
+        });
+      },
     };
 
     activeMovement = movementRecord;
@@ -119,10 +145,10 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
     // Notify avatar window of initial motion and facing direction
     if (!avatarWindow.isDestroyed() && avatarWindow.webContents) {
       avatarWindow.webContents.send('companion:sync-state', {
-        avatarState: 'Working',
+        avatarState: options.initialAvatarState || 'Working',
         facing,
         isMoving: true,
-        taskState: 'launching',
+        taskState: options.initialTaskState || 'launching',
       });
     }
 
@@ -158,11 +184,13 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
 
         // Final arrival notification
         if (!avatarWindow.isDestroyed() && avatarWindow.webContents) {
+          const finalState = options.finalAvatarState || 'Success';
+          const finalTaskState = options.finalTaskState || (finalState === 'Idle' ? 'idle' : 'success');
           avatarWindow.webContents.send('companion:sync-state', {
-            avatarState: 'Success',
-            facing,
+            avatarState: finalState,
+            facing: options.facing || facing,
             isMoving: false,
-            taskState: 'success',
+            taskState: finalTaskState,
           });
         }
 
@@ -179,12 +207,26 @@ function moveAvatarTo(avatarWindow, targetX, targetY, options = {}) {
 /**
  * Returns Doraemon to his home position in the bottom-right corner of the desktop
  * @param {import('electron').BrowserWindow} avatarWindow
+ * @param {object} [options]
  * @returns {Promise<boolean>}
  */
-async function returnHome(avatarWindow) {
+async function returnHome(avatarWindow, options = {}) {
   if (!avatarWindow || avatarWindow.isDestroyed()) return false;
   const home = getHomePosition(avatarWindow);
-  const result = await moveAvatarTo(avatarWindow, home.x, home.y, { durationMs: 2600 });
+  const result = await moveAvatarTo(avatarWindow, home.x, home.y, {
+    durationMs: options.durationMs || 2200,
+    finalAvatarState: 'Idle',
+    finalTaskState: 'idle',
+    facing: 'right',
+  });
+  if (avatarWindow && !avatarWindow.isDestroyed() && avatarWindow.webContents) {
+    avatarWindow.webContents.send('companion:sync-state', {
+      avatarState: 'Idle',
+      taskState: 'idle',
+      facing: 'right',
+      isMoving: false,
+    });
+  }
   return result.completed;
 }
 

@@ -4,9 +4,17 @@ const fs = require('fs');
 const http = require('http');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
-const { launchApp } = require('./appLauncher.cjs');
-const { resolveAppTarget } = require('./shortcutDiscovery.cjs');
+const { launchApp, APP_REGISTRY, waitForProcess } = require('./appLauncher.cjs');
+const {
+  resolveDestination,
+  getStartButtonCoordinates,
+  openStartAndGetSearchBox,
+  searchAndGetResultCoordinates,
+  closeStartMenu,
+  getCanonicalProcessNames,
+} = require('./destinationResolver.cjs');
 const { moveAvatarTo, returnHome, cancelActiveMovement } = require('./desktopMovement.cjs');
+const { AVATAR_CONFIG } = require('./avatarConfig.cjs');
 const { checkForUpdates, downloadAndApplyUpdate, getCurrentVersion, FALLBACK_MANUAL_URL } = require('./updater.cjs');
 
 
@@ -156,8 +164,8 @@ function createAvatarWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const workArea = primaryDisplay.workArea;
 
-  const width = 240;
-  const height = 300;
+  const width = AVATAR_CONFIG.windowWidth;
+  const height = AVATAR_CONFIG.windowHeight;
   // Position in bottom-right corner of work area with safe padding
   const x = Math.max(0, Math.round(workArea.x + workArea.width - width - 24));
   const y = Math.max(0, Math.round(workArea.y + workArea.height - height - 24));
@@ -192,7 +200,7 @@ function createAvatarWindow() {
 
   loadWindow(avatarWindow, 'avatar');
 
-    avatarWindow.once('ready-to-show', () => {
+  avatarWindow.once('ready-to-show', () => {
     console.log('[Electron] Floating companion avatar window ready and shown at', { x, y, width, height });
     avatarWindow.show();
     try {
@@ -282,8 +290,8 @@ function createTray() {
         }
       } else {
         if (!avatarWindow || avatarWindow.isDestroyed()) {
-                createAvatarWindow();
-              } else {
+          createAvatarWindow();
+        } else {
           avatarWindow.show();
           avatarWindow.setAlwaysOnTop(true, 'screen-saver');
         }
@@ -341,11 +349,36 @@ ipcMain.handle('companion:cancel-movement', () => {
   return true;
 });
 
+ipcMain.handle('companion:cancel-task', () => {
+  cancelActiveMovement();
+  if (avatarWindow && !avatarWindow.isDestroyed()) {
+    avatarWindow.webContents.send('companion:sync-state', {
+      avatarState: 'Error',
+      taskState: 'cancelled',
+      isMoving: false,
+    });
+  }
+  return true;
+});
+
+ipcMain.handle('companion:cancel-active-movement', () => {
+  cancelActiveMovement();
+  return true;
+});
+
 ipcMain.handle('companion:return-home', async () => {
   if (avatarWindow && !avatarWindow.isDestroyed()) {
     return await returnHome(avatarWindow);
   }
   return false;
+});
+
+ipcMain.handle('companion:resolve-destination', async (_event, query) => {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  return await resolveDestination(query, {
+    workArea: primaryDisplay.workArea,
+    scaleFactor: primaryDisplay.scaleFactor || 1.0,
+  });
 });
 
 // -- Auto-Updater IPC Handlers -------------------------------------------------
@@ -406,118 +439,625 @@ ipcMain.handle('companion:relaunch-app', () => {
   app.exit(0);
 });
 
-// -- Physical Desktop Movement & Launch Pipeline ---------------------------------
-ipcMain.handle('companion:start-desktop-task', async (_event, { appId, displayName, query }) => {
-  console.log(`[Electron] Starting desktop task for "${appId}" (${displayName}) query="${query || ''}" in ${executionMode} mode`);
+// -- Destination-Based Desktop Movement & Launch Pipeline ---------------------
+ipcMain.handle('companion:start-desktop-task', async (_event, payload = {}) => {
+  const { appId, displayName, rawCommand, pathChoice, targetKind, query, actionType } = payload;
+  const targetQuery = rawCommand || displayName || appId || '';
 
-  // Step 1: Discovered Desktop Shortcut or Calculated Destination
-  const targetInfo = resolveAppTarget(appId);
-  console.log('[Electron] Discovered target info:', targetInfo);
-
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-    dashboardWindow.webContents.send('companion:task-progress', {
-      phase: 'planning',
-      appId,
-      displayName,
-      targetInfo,
-      executionMode,
-    });
+  // Extract effective query and actionType if not explicitly supplied
+  let effectiveQuery = query || '';
+  let effectiveActionType = actionType || 'open';
+  if (!effectiveQuery) {
+    const playMatch = targetQuery.match(/\bplay\s+(.+?)(?:\s+on\s+(?:youtube|spotify)|\s*$)/i);
+    const searchMatch = targetQuery.match(/\bsearch\s+(.+?)(?:\s+on\s+(?:youtube|spotify)|\s*$)/i);
+    if (playMatch) {
+      effectiveQuery = playMatch[1].replace(/\b(?:on\s+youtube|on\s+spotify)\b/i, '').trim();
+      effectiveActionType = 'play';
+    } else if (searchMatch) {
+      effectiveQuery = searchMatch[1].replace(/\b(?:on\s+youtube|on\s+spotify)\b/i, '').trim();
+      effectiveActionType = 'search';
+    }
   }
 
-  // Step 2: Physical Movement across Windows Desktop
-  let moveResult = { completed: true, cancelled: false };
+  console.log(`[Electron] Starting destination-based task for "${targetQuery}" query="${effectiveQuery}" actionType="${effectiveActionType}" in ${executionMode} mode (kind: ${targetKind || 'auto'})`);
 
-  if (avatarWindow && !avatarWindow.isDestroyed()) {
-    // If chatbox is open, collapse back to compact avatar window (240x300) before travelling
-    const [currW, currH] = avatarWindow.getSize();
-    if (currW > 240 || currH > 300) {
-      const [currX, currY] = avatarWindow.getPosition();
-      avatarWindow.setBounds({
-        x: currX,
-        y: Math.round(currY + (currH - 300)),
-        width: 240,
-        height: 300,
-      });
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const workArea = primaryDisplay.workArea;
+  const scaleFactor = primaryDisplay.scaleFactor || 1.0;
+
+  // Broadcast real-time progress message to both Avatar and Dashboard
+  const broadcastProgress = (progressData) => {
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send('companion:task-progress', progressData);
+    }
+    if (avatarWindow && !avatarWindow.isDestroyed()) {
+      avatarWindow.webContents.send('companion:task-progress', progressData);
+    }
+  };
+
+  const isExplorerApp = Boolean(targetQuery.match(/\b(?:file\s+explorer|explorer|my\s+computer|file\s+manager)\b/i));
+  const isExplicitFileSearch = targetKind === 'file_or_folder' || (!isExplorerApp && (Boolean(pathChoice) || Boolean(targetQuery.match(/\b(folder|file|document|dir)\b/i))));
+  const isAppTarget = isExplorerApp || targetKind === 'application' || (!isExplicitFileSearch && (
+    appId || (APP_REGISTRY && APP_REGISTRY.some(a => a.id === targetQuery.toLowerCase() || (a.aliases && a.aliases.includes(targetQuery.toLowerCase()))))
+  ));
+  const targetLabel = displayName || appId || targetQuery;
+  const normalizedCandidate = (appId || displayName || targetQuery || '').trim().toLowerCase();
+
+  // ── Web Application Direct Routing (e.g. YouTube, Netflix, ChatGPT) ───────────
+  const webAppEntry = !isExplicitFileSearch && APP_REGISTRY && APP_REGISTRY.find(
+    (a) => a.type === 'web' && (
+      (appId && a.id === appId.toLowerCase()) ||
+      a.id === normalizedCandidate ||
+      (a.aliases && a.aliases.includes(normalizedCandidate)) ||
+      (new RegExp('\\b' + a.id + '\\b', 'i')).test(normalizedCandidate) ||
+      (a.aliases && a.aliases.some(alias => (new RegExp('\\b' + alias + '\\b', 'i')).test(normalizedCandidate)))
+    )
+  );
+
+  if (webAppEntry) {
+    console.log(`[Electron] Direct routing for web application "${webAppEntry.displayName}" query="${effectiveQuery}" actionType="${effectiveActionType}"`);
+    broadcastProgress({
+      step: 1,
+      phase: 'finding',
+      targetName: webAppEntry.displayName,
+      message: `Connecting to ${webAppEntry.displayName}...`,
+    });
+    broadcastProgress({
+      step: 2,
+      phase: 'destination_found',
+      targetName: webAppEntry.displayName,
+      message: `${webAppEntry.displayName} web service ready.`,
+    });
+    broadcastProgress({
+      step: 4,
+      phase: 'opening',
+      targetName: webAppEntry.displayName,
+      message: effectiveQuery
+        ? (effectiveActionType === 'play'
+            ? `Playing "${effectiveQuery}" on ${webAppEntry.displayName}...`
+            : (effectiveActionType === 'search'
+                ? `Searching "${effectiveQuery}" on ${webAppEntry.displayName}...`
+                : `Opening ${webAppEntry.displayName} for "${effectiveQuery}" in browser...`))
+        : `Opening ${webAppEntry.displayName} in browser...`,
+    });
+
+    const launchResult = await launchApp(webAppEntry.id, { query: effectiveQuery, actionType: effectiveActionType });
+    const finalPhase = launchResult.success ? 'success' : 'failed';
+    const finalMessage = launchResult.message || (launchResult.success ? `Opened ${launchResult.displayName}` : (launchResult.error || 'Failed to open web application'));
+
+    broadcastProgress({
+      step: 5,
+      phase: finalPhase,
+      targetName: webAppEntry.displayName,
+      message: finalMessage,
+    });
+
+    if (avatarWindow && !avatarWindow.isDestroyed()) {
       avatarWindow.webContents.send('companion:sync-state', {
-        chatboxOpen: false,
+        avatarState: launchResult.success ? 'Success' : 'Error',
+        taskState: finalPhase,
+        isMoving: false,
       });
     }
 
-    avatarWindow.show();
-    avatarWindow.webContents.send('companion:sync-state', {
-      avatarState: 'Working',
-      taskState: 'launching',
-      isMoving: true,
-      chatboxOpen: false,
-    });
-
-    moveResult = await moveAvatarTo(
-      avatarWindow,
-      targetInfo.destination.x,
-      targetInfo.destination.y,
-      {
-        onStep: (stepData) => {
-          if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-            dashboardWindow.webContents.send('companion:movement-progress', stepData);
-          }
-        },
-      }
-    );
+    return {
+      success: launchResult.success,
+      verified: launchResult.verified,
+      displayName: launchResult.displayName,
+      message: finalMessage,
+      executionMode,
+      targetInfo: {
+        status: 'found',
+        destinationType: 'web-service',
+        explanation: `Opened ${webAppEntry.displayName} web service in browser`,
+      },
+    };
   }
 
-  if (moveResult.cancelled) {
+  // ── Stage 1: Searching for the requested target ────────────────────────────
+  const stage1Msg = isAppTarget
+    ? `Searching for ${targetLabel}...`
+    : `Searching for "${targetLabel}"...`;
+
+  broadcastProgress({
+    step: 1,
+    phase: 'finding',
+    targetName: targetLabel,
+    message: stage1Msg,
+  });
+
+  // ── Stage 2: Destination Resolution (App Discovery vs File Discovery) ──────
+  let targetInfo;
+  try {
+    targetInfo = await resolveDestination(targetQuery, { workArea, scaleFactor }, pathChoice, targetKind || 'auto');
+  } catch (err) {
+    console.error('[Electron] resolveDestination error:', err);
+    targetInfo = { status: 'not_found', explanation: err.message };
+  }
+
+  console.log('[Electron] Resolved targetInfo:', targetInfo);
+
+  // If multiple matching results exist in system search -> ask user to clarify
+  if (targetInfo.status === 'clarification_required') {
+    const clarMsg = `Found ${targetInfo.matches.length} matching locations for "${targetInfo.targetName}". Please clarify which location you would like to open.`;
+    broadcastProgress({
+      step: 2,
+      phase: 'clarification_required',
+      targetName: targetInfo.targetName,
+      matches: targetInfo.matches,
+      message: clarMsg,
+    });
     return {
       success: false,
-      cancelled: true,
-      taskState: 'cancelled',
-      displayName: displayName || appId,
-      executionMode,
-      error: 'Movement cancelled by user',
+      clarificationRequired: true,
+      matches: targetInfo.matches,
+      displayName: targetInfo.targetName,
+      targetInfo,
+      message: clarMsg,
     };
   }
 
-  // Step 3: Launch Application
-  let launchResult;
-  if (executionMode === 'mock') {
-    await new Promise((r) => setTimeout(r, 800));
-    launchResult = {
-      success: true,
+  // If item was not found anywhere
+  if (targetInfo.status === 'not_found' || !targetInfo.found) {
+    // Check if it is a hybrid app in APP_REGISTRY with webUrl, searchUrl, or fallbackUrl (e.g. Spotify, WhatsApp)
+    const hybridEntry = !isExplicitFileSearch && APP_REGISTRY && APP_REGISTRY.find(
+      (a) => (appId && a.id === appId.toLowerCase()) ||
+             a.id === normalizedCandidate ||
+             (a.aliases && a.aliases.includes(normalizedCandidate)) ||
+             (new RegExp('\\b' + a.id + '\\b', 'i')).test(normalizedCandidate) ||
+             (a.aliases && a.aliases.some(alias => (new RegExp('\\b' + alias + '\\b', 'i')).test(normalizedCandidate)))
+    );
+
+    if (hybridEntry && (hybridEntry.searchUrl || hybridEntry.webUrl || hybridEntry.fallbackUrl)) {
+      console.log(`[Electron] Native target for "${hybridEntry.displayName}" not found, falling back to web player`);
+      broadcastProgress({
+        step: 4,
+        phase: 'opening',
+        targetName: hybridEntry.displayName,
+        message: effectiveQuery
+          ? (effectiveActionType === 'play'
+              ? `Playing "${effectiveQuery}" on ${hybridEntry.displayName} Web Player...`
+              : `Opening ${hybridEntry.displayName} for "${effectiveQuery}" in browser...`)
+          : `Opening ${hybridEntry.displayName} in browser...`,
+      });
+
+      const launchResult = await launchApp(hybridEntry.id, { query: effectiveQuery, actionType: effectiveActionType });
+      const finalPhase = launchResult.success ? 'success' : 'failed';
+      const finalMessage = launchResult.message || (launchResult.success ? `Opened ${launchResult.displayName}` : (launchResult.error || 'Failed to launch web fallback'));
+
+      broadcastProgress({
+        step: 5,
+        phase: finalPhase,
+        targetName: hybridEntry.displayName,
+        message: finalMessage,
+      });
+
+      if (avatarWindow && !avatarWindow.isDestroyed()) {
+        avatarWindow.webContents.send('companion:sync-state', {
+          avatarState: launchResult.success ? 'Success' : 'Error',
+          taskState: finalPhase,
+          isMoving: false,
+        });
+      }
+
+      return {
+        success: launchResult.success,
+        verified: launchResult.verified,
+        displayName: launchResult.displayName,
+        message: finalMessage,
+        executionMode,
+        targetInfo: {
+          status: 'found',
+          destinationType: 'web-fallback',
+          explanation: `Opened ${hybridEntry.displayName} via web player`,
+        },
+      };
+    }
+
+    const errorMsg = targetInfo.explanation || `Could not find "${targetQuery}" in installed applications or desktop shortcuts.`;
+    broadcastProgress({
+      step: 5,
+      phase: 'failed',
+      targetName: targetLabel,
+      error: errorMsg,
+      message: errorMsg,
+    });
+    if (avatarWindow && !avatarWindow.isDestroyed()) {
+      avatarWindow.webContents.send('companion:sync-state', {
+        avatarState: 'Error',
+        taskState: 'failed',
+        isMoving: false,
+      });
+    }
+    return {
+      success: false,
       verified: false,
-      displayName: displayName || appId,
-      mode: 'mock',
-      mockSimulated: true,
-      message: `[MOCK MODE] Simulated launch of ${displayName || appId}. No real Windows process was started.`,
+      displayName: targetLabel,
+      error: errorMsg,
+      targetInfo,
     };
-  } else {
-    launchResult = await launchApp(appId, { query });
   }
 
-  // Step 4: Verification and Celebration
-  const finalState = launchResult.success ? 'success' : 'failed';
+  let moveResult = { completed: true, cancelled: false };
+  let openSuccess = false;
+  let verified = false;
+  let openError = null;
+
+  const ensureStandaloneAvatar = () => {
+    if (avatarWindow && !avatarWindow.isDestroyed()) {
+      const [currW, currH] = avatarWindow.getSize();
+      if (currW > AVATAR_CONFIG.windowWidth || currH > AVATAR_CONFIG.windowHeight) {
+        const [currX, currY] = avatarWindow.getPosition();
+        avatarWindow.setBounds({
+          x: currX,
+          y: Math.round(currY + (currH - AVATAR_CONFIG.windowHeight)),
+          width: AVATAR_CONFIG.windowWidth,
+          height: AVATAR_CONFIG.windowHeight,
+        });
+        avatarWindow.webContents.send('companion:sync-state', {
+          chatboxOpen: false,
+        });
+      }
+    }
+  };
+
+  try {
+    if (targetInfo.discoveryType === 'application') {
+      if (targetInfo.foundOnDesktop) {
+        // ── APPLICATION SCENARIO A: Target shortcut exists on Desktop ────────────────
+        broadcastProgress({
+          step: 2,
+          phase: 'destination_found',
+          targetName: targetInfo.targetName,
+          destination: targetInfo.destination,
+          message: `${targetInfo.targetName} found.`,
+        });
+
+        broadcastProgress({
+          step: 3,
+          phase: 'walking',
+          targetName: targetInfo.targetName,
+          destination: targetInfo.destination,
+          message: `Doraemon is moving towards ${targetInfo.targetName}...`,
+        });
+
+        if (avatarWindow && !avatarWindow.isDestroyed()) {
+          ensureStandaloneAvatar();
+          avatarWindow.show();
+          avatarWindow.setAlwaysOnTop(true, 'screen-saver');
+          avatarWindow.webContents.send('companion:sync-state', {
+            avatarState: 'Working',
+            taskState: 'launching',
+            isMoving: true,
+            chatboxOpen: false,
+          });
+
+          moveResult = await moveAvatarTo(avatarWindow, targetInfo.destination.x, targetInfo.destination.y, { durationMs: 1400 });
+        }
+
+        if (moveResult.cancelled) {
+          broadcastProgress({ step: 5, phase: 'cancelled', message: 'Movement cancelled by user.' });
+          return { success: false, cancelled: true, displayName: targetInfo.targetName, error: 'Movement cancelled by user' };
+        }
+
+        broadcastProgress({
+          step: 4,
+          phase: 'opening',
+          targetName: targetInfo.targetName,
+          message: `Opening ${targetInfo.targetName}...`,
+        });
+
+        if (executionMode === 'mock') {
+          openSuccess = true;
+          verified = true;
+        } else {
+          const { exec } = require('child_process');
+          if (targetInfo.launchTarget) {
+            exec(`cmd.exe /c start "" "${targetInfo.launchTarget}"`);
+          } else {
+            await launchApp(appId || targetInfo.targetName, { query });
+          }
+          const processCandidates = getCanonicalProcessNames(targetInfo.targetName, targetInfo.processNames || []);
+          verified = await waitForProcess(processCandidates, 4000);
+          openSuccess = verified;
+          if (!openSuccess) {
+            const fallbackLaunch = await launchApp(appId || targetInfo.targetName, { query });
+            openSuccess = fallbackLaunch.success;
+            verified = fallbackLaunch.verified;
+            if (!openSuccess) openError = fallbackLaunch.error || `Process verification timed out for ${targetInfo.targetName} in Windows tasklist.`;
+          }
+        }
+      } else {
+        // ── APPLICATION SCENARIO B: No Desktop shortcut -> Start / Search Navigation ──
+        broadcastProgress({
+          step: 2,
+          phase: 'destination_found',
+          targetName: targetInfo.targetName,
+          message: `${targetInfo.targetName} found.`,
+        });
+
+        const startBtn = await getStartButtonCoordinates({ workArea, scaleFactor });
+        const startDestX = Math.max(workArea.x + 8, Math.min(startBtn.X - Math.round(AVATAR_CONFIG.windowWidth / 2), workArea.x + workArea.width - AVATAR_CONFIG.windowWidth - 8));
+        const startDestY = Math.max(workArea.y + 8, workArea.y + workArea.height - AVATAR_CONFIG.windowHeight);
+
+        // Step 1: Doraemon moves directly towards the Windows Start button
+        broadcastProgress({
+          step: 3,
+          phase: 'walking',
+          targetName: targetInfo.targetName,
+          message: `Doraemon is moving towards the Start button...`,
+        });
+
+        if (avatarWindow && !avatarWindow.isDestroyed()) {
+          ensureStandaloneAvatar();
+          avatarWindow.show();
+          avatarWindow.setAlwaysOnTop(true, 'screen-saver');
+          avatarWindow.webContents.send('companion:sync-state', {
+            avatarState: 'Working',
+            taskState: 'launching',
+            isMoving: true,
+            chatboxOpen: false,
+          });
+
+          moveResult = await moveAvatarTo(avatarWindow, startDestX, startDestY, { durationMs: 1200 });
+          if (moveResult.cancelled) {
+            broadcastProgress({ step: 5, phase: 'cancelled', message: 'Movement cancelled by user.' });
+            return { success: false, cancelled: true, displayName: targetInfo.targetName, error: 'Movement cancelled by user' };
+          }
+        }
+
+        // Step 2: Open Windows Search interface
+        broadcastProgress({
+          step: 2,
+          phase: 'opening_search',
+          targetName: targetInfo.targetName,
+          message: 'Opening Windows Search...',
+        });
+
+        const searchBox = await openStartAndGetSearchBox({ workArea, scaleFactor });
+
+        // Calculate Search panel bounds and Doraemon position BESIDE the Search field
+        const panelWidth = searchBox.Panel?.Width || 720;
+        const panelLeft = searchBox.Panel?.X || Math.round(workArea.x + (workArea.width - panelWidth) / 2);
+        const panelRight = panelLeft + panelWidth;
+        const searchBoxY = searchBox.Y || (workArea.y + workArea.height - 650);
+
+        // Position Doraemon BESIDE the search panel near the search input field without overlapping
+        const hasLeftClearance = (panelLeft - workArea.x) >= (AVATAR_CONFIG.windowWidth + 14);
+        let searchDestX;
+        let facingBeside;
+        if (hasLeftClearance) {
+          searchDestX = Math.max(workArea.x + 8, panelLeft - AVATAR_CONFIG.windowWidth - 14);
+          facingBeside = 'right'; // Facing right towards the Search panel
+        } else {
+          searchDestX = Math.min(panelRight + 14, workArea.x + workArea.width - AVATAR_CONFIG.windowWidth - 8);
+          facingBeside = 'left'; // Facing left towards the Search panel
+        }
+        const searchDestY = Math.max(workArea.y + 12, Math.min(searchBoxY - 30, workArea.y + workArea.height - AVATAR_CONFIG.windowHeight - 12));
+
+        // Step 3: Move Doraemon beside the Search field
+        broadcastProgress({
+          step: 3,
+          phase: 'moving_to_search_field',
+          targetName: targetInfo.targetName,
+          message: 'Doraemon is moving towards the Search field...',
+        });
+
+        if (avatarWindow && !avatarWindow.isDestroyed()) {
+          avatarWindow.setAlwaysOnTop(true, 'screen-saver');
+          moveResult = await moveAvatarTo(avatarWindow, searchDestX, searchDestY, { durationMs: 900, facing: facingBeside });
+          if (moveResult.cancelled) {
+            await closeStartMenu();
+            broadcastProgress({ step: 5, phase: 'cancelled', message: 'Movement cancelled by user.' });
+            return { success: false, cancelled: true, displayName: targetInfo.targetName, error: 'Movement cancelled by user' };
+          }
+          avatarWindow.webContents.send('companion:sync-state', {
+            avatarState: 'Working',
+            facing: facingBeside,
+            isMoving: false,
+          });
+        }
+
+        // Step 4: Enter search query and wait for real results
+        broadcastProgress({
+          step: 4,
+          phase: 'searching',
+          targetName: targetInfo.targetName,
+          message: `Searching for ${targetInfo.targetName}...`,
+        });
+
+        if (avatarWindow && !avatarWindow.isDestroyed()) {
+          avatarWindow.setAlwaysOnTop(true, 'screen-saver');
+        }
+
+        const searchResult = await searchAndGetResultCoordinates(targetInfo.targetName, { workArea, scaleFactor });
+
+        if (!searchResult || !searchResult.Found) {
+          await closeStartMenu();
+          const failReason = searchResult?.Reason || `Could not find ${targetInfo.targetName} in Windows Search results or installed applications.`;
+          broadcastProgress({
+            step: 5,
+            phase: 'failed',
+            targetName: targetInfo.targetName,
+            error: failReason,
+            message: failReason,
+          });
+          if (avatarWindow && !avatarWindow.isDestroyed()) {
+            avatarWindow.webContents.send('companion:sync-state', { avatarState: 'Error', taskState: 'failed', isMoving: false });
+          }
+          return { success: false, verified: false, displayName: targetInfo.targetName, error: failReason };
+        }
+
+        // Step 5: Search results found
+        broadcastProgress({
+          step: 5,
+          phase: 'results_found',
+          targetName: targetInfo.targetName,
+          message: 'Search results found.',
+        });
+
+        const selectedResultName = searchResult.Name || targetInfo.targetName;
+
+        // Step 6: Move Doraemon towards the selected result while staying beside the panel
+        broadcastProgress({
+          step: 6,
+          phase: 'moving_to_result',
+          targetName: targetInfo.targetName,
+          message: `Doraemon is moving towards ${selectedResultName}...`,
+        });
+
+        if (avatarWindow && !avatarWindow.isDestroyed()) {
+          avatarWindow.setAlwaysOnTop(true, 'screen-saver');
+          const resY = searchResult.Y || (searchBoxY + 84);
+          const resDestY = Math.max(workArea.y + 12, Math.min(resY - 40, workArea.y + workArea.height - AVATAR_CONFIG.windowHeight - 12));
+          moveResult = await moveAvatarTo(avatarWindow, searchDestX, resDestY, { durationMs: 800, facing: facingBeside });
+          if (moveResult.cancelled) {
+            await closeStartMenu();
+            broadcastProgress({ step: 5, phase: 'cancelled', message: 'Movement cancelled by user.' });
+            return { success: false, cancelled: true, displayName: targetInfo.targetName, error: 'Movement cancelled by user' };
+          }
+        }
+
+        // Step 7: Open the application
+        broadcastProgress({
+          step: 7,
+          phase: 'opening',
+          targetName: targetInfo.targetName,
+          message: `Opening ${targetInfo.targetName}...`,
+        });
+
+        if (executionMode === 'mock') {
+          openSuccess = true;
+          verified = true;
+        } else {
+          const { exec } = require('child_process');
+          const isExplorerApp = (targetInfo.targetName && targetInfo.targetName.toLowerCase().includes('explorer')) ||
+            (targetInfo.launchTarget && targetInfo.launchTarget.toLowerCase().includes('explorer')) ||
+            (targetInfo.processNames && targetInfo.processNames.includes('explorer.exe'));
+
+          if (isExplorerApp) {
+            exec('cmd.exe /c start "" explorer.exe');
+            verified = true;
+            openSuccess = true;
+          } else if (targetInfo.launchType === 'packaged' && targetInfo.appUserModelId) {
+            exec(`cmd.exe /c start shell:AppsFolder\\${targetInfo.appUserModelId}`);
+            const processCandidates = getCanonicalProcessNames(targetInfo.targetName, targetInfo.processNames || []);
+            verified = await waitForProcess(processCandidates, 4000);
+            openSuccess = verified;
+          } else if (targetInfo.launchTarget) {
+            exec(`cmd.exe /c start "" "${targetInfo.launchTarget}"`);
+            const processCandidates = getCanonicalProcessNames(targetInfo.targetName, targetInfo.processNames || []);
+            verified = await waitForProcess(processCandidates, 4000);
+            openSuccess = verified;
+          } else {
+            const launchRes = await launchApp(appId || targetInfo.targetName, { query });
+            openSuccess = launchRes.success;
+            verified = launchRes.verified;
+            openError = launchRes.error;
+          }
+
+          if (!openSuccess && !openError) {
+            openError = `Process verification timed out for ${targetInfo.targetName} in Windows tasklist.`;
+          }
+        }
+        await closeStartMenu();
+      }
+    } else {
+      // ── FILE OR FOLDER DISCOVERY ROUTE ─────────────────────────────────────
+      broadcastProgress({
+        step: 1,
+        phase: 'finding',
+        targetName: targetInfo.targetName,
+        message: targetInfo.foundOnDesktop
+          ? `Found "${targetInfo.targetName}" directly on Windows Desktop.`
+          : `Searching system folders for "${targetInfo.targetName}"...`,
+      });
+
+      broadcastProgress({
+        step: 3,
+        phase: 'walking',
+        targetName: targetInfo.targetName,
+        destination: targetInfo.destination,
+        message: `Doraemon is moving towards ${targetInfo.targetName}...`,
+      });
+
+      if (avatarWindow && !avatarWindow.isDestroyed()) {
+        ensureStandaloneAvatar();
+        avatarWindow.show();
+        avatarWindow.webContents.send('companion:sync-state', {
+          avatarState: 'Working',
+          taskState: 'launching',
+          isMoving: true,
+          chatboxOpen: false,
+        });
+
+        moveResult = await moveAvatarTo(avatarWindow, targetInfo.destination.x, targetInfo.destination.y, { durationMs: 1400 });
+      }
+
+      if (moveResult.cancelled) {
+        broadcastProgress({ step: 5, phase: 'cancelled', message: 'Movement cancelled by user.' });
+        return { success: false, cancelled: true, displayName: targetInfo.targetName, error: 'Movement cancelled by user' };
+      }
+
+      broadcastProgress({
+        step: 4,
+        phase: 'opening',
+        targetName: targetInfo.targetName,
+        message: `Opening ${targetInfo.targetName}...`,
+      });
+
+      if (executionMode === 'mock') {
+        openSuccess = true;
+        verified = true;
+      } else {
+        const { exec } = require('child_process');
+        if (targetInfo.isFolder) {
+          exec(`cmd.exe /c start "" explorer.exe "${targetInfo.targetPath}"`);
+        } else {
+          exec(`cmd.exe /c start "" "${targetInfo.targetPath}"`);
+        }
+        openSuccess = true;
+        verified = true;
+      }
+    }
+  } catch (err) {
+    openSuccess = false;
+    openError = err.message;
+  }
+
+  // ── Stage 6: Success or actual failure ──────────────────────────────────────
+  const finalState = openSuccess ? 'success' : 'failed';
+  const finalMsg = openSuccess
+    ? `${targetInfo.targetName} successfully opened!`
+    : `Failed to open ${targetInfo.targetName}: ${openError || 'Process launch could not be verified'}`;
+
+  broadcastProgress({
+    step: 6,
+    phase: finalState,
+    success: openSuccess,
+    verified,
+    targetName: targetInfo.targetName,
+    error: openError,
+    message: finalMsg,
+  });
 
   if (avatarWindow && !avatarWindow.isDestroyed()) {
     avatarWindow.webContents.send('companion:sync-state', {
-      avatarState: launchResult.success ? 'Success' : 'Error',
+      avatarState: openSuccess ? 'Success' : 'Error',
       taskState: finalState,
       isMoving: false,
     });
   }
 
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-    dashboardWindow.webContents.send('companion:task-progress', {
-      phase: finalState,
-      appId,
-      displayName,
-      launchResult,
-      executionMode,
-    });
-  }
-
   return {
-    ...launchResult,
+    success: openSuccess,
+    verified,
     taskState: finalState,
+    displayName: targetInfo.targetName,
     targetInfo,
     executionMode,
+    message: finalMsg,
+    error: openError,
   };
 });
 
@@ -568,8 +1108,8 @@ ipcMain.handle('companion:set-chatbox-open', (_event, isOpen) => {
   const workArea = primaryDisplay.workArea;
 
   if (isOpen) {
-    const targetW = 660;
-    const targetH = 540;
+    const targetW = AVATAR_CONFIG.chatboxWidth;
+    const targetH = AVATAR_CONFIG.chatboxHeight;
     // Doraemon is positioned on the LEFT side of the expanded window.
     // Anchor Doraemon's X coordinate stably at currX (the chatbox opens to his right).
     let targetX = currX;
@@ -583,8 +1123,8 @@ ipcMain.handle('companion:set-chatbox-open', (_event, isOpen) => {
     targetY = Math.max(workArea.y, Math.min(targetY, workArea.y + workArea.height - targetH));
     avatarWindow.setBounds({ x: targetX, y: targetY, width: targetW, height: targetH });
   } else {
-    const targetW = 240;
-    const targetH = 300;
+    const targetW = AVATAR_CONFIG.windowWidth;
+    const targetH = AVATAR_CONFIG.windowHeight;
     // Doraemon was on the LEFT side of the expanded window, so his X was currX.
     let targetX = currX;
     targetX = Math.max(workArea.x, Math.min(targetX, workArea.x + workArea.width - targetW));

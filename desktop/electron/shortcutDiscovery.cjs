@@ -50,7 +50,7 @@ const APP_SHORTCUT_REGISTRY = {
   },
   whatsapp: {
     displayName: 'WhatsApp',
-    possibleShortcuts: ['WhatsApp.lnk'],
+    possibleShortcuts: ['WhatsApp.lnk', 'WhatsApp Desktop.lnk'],
     defaultZone: 'taskbar-tools',
     gridIndex: 5,
   },
@@ -89,12 +89,6 @@ const APP_SHORTCUT_REGISTRY = {
     possibleShortcuts: ['Gmail.lnk'],
     defaultZone: 'taskbar-tools',
     gridIndex: 11,
-  },
-  whatsapp: {
-    displayName: 'WhatsApp',
-    possibleShortcuts: ['WhatsApp.lnk', 'WhatsApp Desktop.lnk'],
-    defaultZone: 'desktop-grid',
-    gridIndex: 5,
   },
 };
 

@@ -27,7 +27,10 @@ contextBridge.exposeInMainWorld('companionAPI', {
    * Physical Desktop Movement & Launch Pipeline
    */
   startDesktopTask: (data) => ipcRenderer.invoke('companion:start-desktop-task', data),
+  resolveDestination: (query) => ipcRenderer.invoke('companion:resolve-destination', query),
   cancelMovement: () => ipcRenderer.invoke('companion:cancel-movement'),
+  cancelTask: () => ipcRenderer.invoke('companion:cancel-task'),
+  cancelActiveMovement: () => ipcRenderer.invoke('companion:cancel-active-movement'),
   returnHome: () => ipcRenderer.invoke('companion:return-home'),
   setExecutionMode: (mode) => ipcRenderer.invoke('companion:set-execution-mode', mode),
   getExecutionMode: () => ipcRenderer.invoke('companion:get-execution-mode'),
