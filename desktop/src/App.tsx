@@ -681,6 +681,7 @@ export default function App() {
           appId,
           displayName,
           rawCommand,
+          query: intent?.query,
           pathChoice: specificChoice?.path,
           targetKind,
         })
