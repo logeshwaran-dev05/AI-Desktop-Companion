@@ -73,13 +73,17 @@ app.include_router(catalogue_router)
 # Browser Profiles Endpoint
 # ---------------------------------------------------------------------------
 
-@app.get("/api/browser/profiles", response_model=List[BrowserProfile])
-def get_browser_profiles_endpoint():
-    """Return discovered Chrome browser profiles.
+def get_browser_profiles(browser: str = "chrome") -> List[dict]:
+    """Wrapper to fetch browser profiles; facilitates testing.
+    Imports the actual implementation from windows_automation.browser_profiles.
     """
+    from windows_automation.browser_profiles import get_browser_profiles as _g
+    return _g(browser)
+
+def get_browser_profiles_endpoint():
+    """Return discovered Chrome browser profiles."""
     try:
-        from windows_automation.browser_profiles import get_browser_profiles
-        profiles = get_browser_profiles("chrome")
+        profiles = get_browser_profiles()
         return profiles
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -240,13 +244,17 @@ def submit_voice_transcript(request: VoiceTranscriptRequest):
 
 # ---------------------------------------------------------------------------
 # Browser Profiles Endpoint
-@app.get("/api/browser/profiles", response_model=List[BrowserProfile])
-def get_browser_profiles_endpoint():
-    """Return discovered Chrome browser profiles.
+def get_browser_profiles(browser: str = "chrome") -> List[dict]:
+    """Wrapper to fetch browser profiles; facilitates testing.
+    Imports the actual implementation from windows_automation.browser_profiles.
     """
+    from windows_automation.browser_profiles import get_browser_profiles as _g
+    return _g(browser)
+
+def get_browser_profiles_endpoint():
+    """Return discovered Chrome browser profiles."""
     try:
-        from windows_automation.browser_profiles import get_browser_profiles
-        profiles = get_browser_profiles("chrome")
+        profiles = get_browser_profiles()
         return profiles
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
