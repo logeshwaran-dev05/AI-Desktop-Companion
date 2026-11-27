@@ -520,8 +520,8 @@ export function resolveAppIntent(rawText: string): ResolvedIntent {
   }
 }
 
-/** Check whether the text looks like a "launch / open application" intent */
+/** Check whether the text looks like a "launch / open application / navigate destination" intent */
 export function isLaunchIntent(text: string): boolean {
-  if (/\b(open|launch|start|run|show|access|play|stream|search|find|google)\b/i.test(text)) return true
+  if (/\b(open|launch|start|run|show|access|play|stream|search|find|google|goto|go\s+to|navigate|view)\b/i.test(text)) return true
   return resolveAppIntent(text) !== null
 }

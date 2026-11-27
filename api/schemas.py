@@ -172,6 +172,9 @@ class TaskResultResponse(BaseModel):
     application_id: Optional[str] = None
     structured_request: Optional[Dict[str, Any]] = None
     completed_at: Optional[str] = None
+    requires_clarification: Optional[bool] = None
+    clarification_question: Optional[str] = None
+    steps: Optional[List[Dict[str, Any]]] = None
 
 # New schema for browser profiles
 class BrowserProfile(BaseModel):
@@ -194,6 +197,9 @@ class BrowserProfile(BaseModel):
     application_id: Optional[str] = None
     structured_request: Optional[Dict[str, Any]] = None
     completed_at: Optional[str] = None
+    requires_clarification: Optional[bool] = None
+    clarification_question: Optional[str] = None
+    steps: Optional[List[Dict[str, Any]]] = None
 
 
 

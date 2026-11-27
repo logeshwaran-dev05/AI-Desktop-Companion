@@ -52,6 +52,9 @@ if user32:
     if hasattr(user32, "SetCursorPos"):
         user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
         user32.SetCursorPos.restype = wintypes.BOOL
+    if hasattr(user32, "SendInput"):
+        user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
+        user32.SendInput.restype = wintypes.UINT
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -143,8 +146,18 @@ def press_vk_key(vk_code: int) -> None:
 def type_text(text: str, press_enter: bool = True, delay: float = 0.01) -> None:
     """
     Type a string into the currently focused window with optional trailing Enter.
-    Handles Unicode, punctuation, and multi-line text safely.
+    Uses Win32 Unicode clipboard paste for multi-character strings when delay > 0
+    to guarantee 100% exact character fidelity on Windows 11 WinUI apps (Notepad, etc.),
+    falling back to SendInput Unicode events.
     """
+    if delay > 0 and len(text) > 2 and set_clipboard_text(text):
+        time.sleep(0.05)
+        press_hotkey("ctrl", "v")
+        if press_enter:
+            time.sleep(0.05)
+            press_vk_key(VK_CODES["enter"])
+        return
+
     for ch in text:
         if ch == "\n":
             press_vk_key(VK_CODES["enter"])
@@ -167,7 +180,7 @@ def press_hotkey(*keys: str) -> None:
     if not user32:
         return
 
-    vk_list = [VK_CODES.get(k.lower(), ord(k.upper())) for k in keys]
+    vk_list = [VK_CODES[k.lower()] if k.lower() in VK_CODES else ord(k.upper()[0]) for k in keys]
 
     # Key down all
     for vk in vk_list:
@@ -331,12 +344,15 @@ def clipboard_paste(target_app: Optional[str] = None, text: Optional[str] = None
     return True
 
 
-def click_youtube_result(ordinal_index: int = 1) -> bool:
+def click_youtube_result(ordinal_index: int = 1, target: Optional[str] = None) -> bool:
     """
     Focuses the YouTube/browser window and clicks the N-th video in search results.
     ordinal_index: 1-based index (e.g. 1 for 1st video, 2 for 2nd video).
     """
-    focus_window_by_title("YouTube") or focus_window_by_title("Chrome") or focus_window_by_title("Edge")
+    if target and target not in {"active_window", ""}:
+        focus_window_by_title(target)
+    else:
+        focus_window_by_title("YouTube") or focus_window_by_title("Chrome") or focus_window_by_title("Edge")
     time.sleep(0.5)
 
     idx = max(1, int(ordinal_index))

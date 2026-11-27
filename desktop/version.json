@@ -1,9 +1,13 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
+  "releaseDate": "2026-11-24T17:00:50.062Z",
+  "updatedAt": 1795539650064
+}
+  "version": "1.0.7",
   "name": "JM Vertex AI Desktop Companion",
-  "releaseDate": "2026-11-24",
+  "releaseDate": "2026-11-27",
   "downloadUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/payload.zip",
   "setupExeUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/JM-Vertex-AI-Companion-Setup.exe",
   "fallbackWebUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/",
-  "releaseNotes": "Chrome multi-profile bypass engine, native Windows GUI automation primitives (typing, clipboard, hotkeys), and GitHub Pages CI/CD fix."
+  "releaseNotes": "Passes YouTube song queries directly to auto-play watch URLs, restarts Python backend cleanly on update relaunch, and ensures exact clipboard typing."
 }

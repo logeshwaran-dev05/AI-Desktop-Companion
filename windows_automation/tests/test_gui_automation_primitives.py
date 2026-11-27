@@ -147,6 +147,95 @@ class TestGuiAutomationPrimitives(unittest.TestCase):
             mock_focus.assert_called_once_with("ChatGPT")
             mock_paste.assert_called_once_with(target_app="ChatGPT", text="write an email to my manager")
 
+    def test_capture_ai_response_action(self):
+        req = ActionRequest(
+            action_id="act-cap-1",
+            task_id="task-1",
+            action_name="capture_ai_response",
+            target="ChatGPT",
+            parameters={"delay_before_capture": 0.0},
+        )
+        with patch("windows_automation.gui_primitives.focus_window_by_title", return_value=True), \
+             patch("windows_automation.gui_primitives.press_hotkey") as mock_hk, \
+             patch("windows_automation.gui_primitives.get_clipboard_text", return_value="Dear Manager, ..."):
+            res = self.executor.execute(req)
+            self.assertEqual(res.status, "completed")
+            self.assertEqual(res.verification.details["captured_text"], "Dear Manager, ...")
+            mock_hk.assert_called_once_with("ctrl", "shift", "c")
+
+    def test_batch_download_action(self):
+        req = ActionRequest(
+            action_id="act-dl-1",
+            task_id="task-1",
+            action_name="batch_download",
+            target="Downloads",
+            parameters={"items": ["python cheatsheet", "react docs"]},
+        )
+        with patch.object(self.executor, "_open_url") as mock_open:
+            res = self.executor.execute(req)
+            self.assertEqual(res.status, "completed")
+            self.assertEqual(res.verification.details["downloaded_count"], 2)
+            self.assertEqual(mock_open.call_count, 2)
+
+
+    def test_type_text_with_delay_before_type_and_focus(self):
+        req = ActionRequest(
+            action_id="act-type-chatgpt",
+            task_id="task-chatgpt",
+            action_name="type_text",
+            target="ChatGPT",
+            parameters={
+                "text": "write an email to my manager",
+                "press_enter": True,
+                "delay_before_type": 0.05,
+            }
+        )
+        with patch("windows_automation.gui_primitives.focus_window_by_title", return_value=True) as mock_focus, \
+             patch("windows_automation.gui_primitives.type_text") as mock_type:
+            res = self.executor.execute(req)
+            self.assertEqual(res.status, "completed")
+            self.assertEqual(res.verification_status, "verified")
+            mock_focus.assert_called_once_with("ChatGPT")
+            mock_type.assert_called_once_with("write an email to my manager", press_enter=True)
+
+    def test_clipboard_paste_with_delay_before_type(self):
+        req = ActionRequest(
+            action_id="act-paste-gemini",
+            task_id="task-gemini",
+            action_name="clipboard_paste",
+            target="Gemini",
+            parameters={
+                "text": "what is python",
+                "delay_before_type": 0.05,
+            }
+        )
+        with patch("windows_automation.gui_primitives.focus_window_by_title", return_value=True) as mock_focus, \
+             patch("windows_automation.gui_primitives.clipboard_paste") as mock_paste:
+            res = self.executor.execute(req)
+            self.assertEqual(res.status, "completed")
+            self.assertEqual(res.verification_status, "verified")
+            mock_focus.assert_called_once_with("Gemini")
+            mock_paste.assert_called_once_with(target_app="Gemini", text="what is python")
+
+    def test_click_youtube_result_brings_foreground(self):
+        req = ActionRequest(
+            action_id="act-yt-click-1",
+            task_id="task-yt",
+            action_name="click_youtube_result",
+            target="YouTube",
+            parameters={
+                "ordinal_index": 1,
+                "delay_before_click": 0.05,
+            }
+        )
+        with patch("windows_automation.gui_primitives.focus_window_by_title", return_value=True) as mock_focus, \
+             patch("windows_automation.gui_primitives.click_youtube_result") as mock_click:
+            res = self.executor.execute(req)
+            self.assertEqual(res.status, "completed")
+            self.assertEqual(res.verification_status, "verified")
+            mock_focus.assert_called_once_with("YouTube")
+            mock_click.assert_called_once_with(ordinal_index=1, target="YouTube")
+
 
 if __name__ == "__main__":
     unittest.main()

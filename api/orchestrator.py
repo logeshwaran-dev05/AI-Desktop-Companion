@@ -391,6 +391,24 @@ class PermissionEvaluator:
     """
 
     DIRECT_ALLOWLIST = {"notepad", "notepad.exe", "app_notepad"}
+    HUMAN_ACTIVITY_ACTIONS = {
+        "search_web_app",
+        "open_website",
+        "search",
+        "play_video",
+        "ask_prompt",
+        "prompt_ai_chat",
+        "type_text",
+        "clipboard_copy",
+        "clipboard_paste",
+        "click_youtube_result",
+        "capture_ai_response",
+        "batch_download",
+        "compose_email",
+        "navigate_url",
+        "press_hotkey",
+        "wait",
+    }
 
     def evaluate(self, task_id: str, action_name: str, target: str) -> AuthorizationDecision:
         """
@@ -404,6 +422,8 @@ class PermissionEvaluator:
 
         # Check supported actions (including extended actions for approved plans)
         if clean_action not in ("open_application", "search_web_app", "type_text", "click_youtube_result"):
+        # Check supported actions
+        if clean_action != "open_application" and clean_action not in self.HUMAN_ACTIVITY_ACTIONS:
             return AuthorizationDecision(
                 decision_id=decision_id,
                 permission_status="denied",
@@ -420,14 +440,14 @@ class PermissionEvaluator:
                 reason="Target cannot be empty.",
             )
 
-        # Web search actions are allowlisted for direct execution
-        if clean_action == "search_web_app":
+        # Human-activity, web search, and GUI automation actions are allowlisted for direct execution
+        if clean_action in self.HUMAN_ACTIVITY_ACTIONS:
             return AuthorizationDecision(
                 decision_id=decision_id,
                 permission_status="granted",
                 requires_user_approval=False,
-                approval_reference="user_auto_allowlist_web_search",
-                reason=f"Web search on '{target}' is allowlisted.",
+                approval_reference="user_auto_allowlist_human_activity",
+                reason=f"Action '{clean_action}' on '{target}' is allowlisted.",
             )
 
         # 1. Milestone 1 Allowlist Check: Direct launch granted for Notepad
@@ -734,6 +754,15 @@ class TaskOrchestrator:
         # Step 5: Application Identifier Resolution & Structured Request Generation
         self.state_machine.transition(task, "matching", "Resolving target application against installed catalogue.")
         steps_list: List[Dict[str, Any]] = task["steps"]
+        if len(steps_list) > 1 or steps_list[0].get("action") not in ("open_application", "search_web_app"):
+            return self._execute_multistep_run_command(
+                task=task,
+                steps_list=steps_list,
+                auto_execute=auto_execute,
+                timeout_seconds=timeout_seconds,
+                plan_response=plan_response,
+            )
+
         step_data = steps_list[0]
         action_name = str(step_data.get("action", ""))
         raw_target = str(step_data.get("target", ""))
@@ -885,6 +914,119 @@ class TaskOrchestrator:
 
         return task
 
+    def _execute_multistep_run_command(
+        self,
+        task: Dict[str, Any],
+        steps_list: List[Dict[str, Any]],
+        auto_execute: bool,
+        timeout_seconds: float,
+        plan_response: Any,
+    ) -> Dict[str, Any]:
+        """Execute multi-step and human-activity plans sequentially with inter-step context passing."""
+        task_id = task["task_id"]
+        if not auto_execute:
+            return task
+
+        if self.adapter is None:
+            self.state_machine.transition(task, "failed", "Windows Automation service is unavailable.")
+            task["error_code"] = "ERR_AUTOMATION_UNAVAILABLE"
+            task["error_message"] = "Windows Automation service is offline or unreachable."
+            task["completed_at"] = current_iso_timestamp()
+            return task
+
+        context: Dict[str, Any] = {}
+        last_result: Optional[ExecutionResult] = None
+
+        for idx, step_data in enumerate(steps_list):
+            task["current_step_index"] = idx
+            action_name = str(step_data.get("action", ""))
+            target = str(step_data.get("target", ""))
+            raw_params = step_data.get("parameters") if isinstance(step_data.get("parameters"), dict) else {}
+            merged_params = {**context, **raw_params} if context else dict(raw_params)
+
+            # Resolve desktop app target when action is open_application
+            if action_name == "open_application":
+                resolved_app = self.resolver.resolve(target)
+                if resolved_app:
+                    target = str(resolved_app["app_name"])
+                    step_data["target"] = target
+
+            auth = self.permission_evaluator.evaluate(task_id, action_name, target)
+            task["authorization"] = auth.to_dict()
+            if auth.permission_status == "denied":
+                self.state_machine.transition(task, "failed", auth.reason)
+                task["error_code"] = "ERR_PERMISSION_DENIED"
+                task["error_message"] = auth.reason
+                task["completed_at"] = current_iso_timestamp()
+                return task
+
+            self.state_machine.transition(
+                task, "launching", f"Step {idx + 1}/{len(steps_list)}: '{action_name}' on '{target}'."
+            )
+            plan_step = PlanStep(
+                step_id=step_data.get("step_id", idx + 1),
+                action=action_name,
+                target=target,
+                depends_on=step_data.get("depends_on", []),
+                expected_outcome=step_data.get("expected_outcome", ""),
+                parameters=merged_params,
+            )
+
+            try:
+                exec_result: ExecutionResult = self.adapter.execute_plan_step(
+                    step=plan_step,
+                    task_id=task_id,
+                    authorization=auth,
+                    timeout_seconds=timeout_seconds,
+                )
+            except Exception as exc:
+                self.state_machine.transition(task, "failed", f"Step {idx + 1} failed: {str(exc)}")
+                task["error_code"] = "ERR_AUTOMATION_FAILURE"
+                task["error_message"] = str(exc)
+                task["completed_at"] = current_iso_timestamp()
+                return task
+
+            last_result = exec_result
+            if exec_result.status != "completed":
+                self.state_machine.transition(task, "failed", exec_result.error_message or f"Step {idx + 1} failed.")
+                task["error_code"] = exec_result.error_code or "ERR_LAUNCH_FAILED"
+                task["error_message"] = exec_result.error_message or "Step execution failed."
+                task["completed_at"] = current_iso_timestamp()
+                return task
+
+            # Pass captured/copied output forward to subsequent steps (e.g. capture_ai_response -> clipboard_paste)
+            if exec_result.verification and isinstance(exec_result.verification.details, dict):
+                details = exec_result.verification.details
+                captured = details.get("captured_text") or details.get("copied_text")
+                if captured:
+                    context["text"] = captured
+                    context["output_text"] = captured
+
+        if last_result:
+            task["active_action_id"] = None
+            task["duration_ms"] = last_result.duration_ms
+            task["completed_at"] = last_result.completed_at
+            result_dict = last_result.to_dict()
+            if context.get("output_text"):
+                result_dict["output_text"] = context["output_text"]
+            task["result"] = result_dict
+            task["verification"] = last_result.verification.to_dict() if last_result.verification else None
+            task["audit"] = last_result.audit.to_dict() if last_result.audit else None
+
+        if getattr(plan_response, "requires_clarification", False) and getattr(plan_response, "clarification_question", None):
+            task["requires_clarification"] = True
+            task["clarification_question"] = plan_response.clarification_question
+            task["message"] = plan_response.clarification_question
+            self.state_machine.transition(task, "launched", plan_response.clarification_question)
+        else:
+            msg = f"Completed {len(steps_list)}-step human-activity workflow."
+            task["message"] = msg
+            self.state_machine.transition(task, "launched", msg)
+
+        task["error_code"] = None
+        task["error_message"] = None
+        return task
+
     # -----------------------------------------------------------------------
     # Task Lifecycle Management (Preserved for Backward Compatibility)
     # -----------------------------------------------------------------------
@@ -904,11 +1046,16 @@ class TaskOrchestrator:
         message = "Task initialized."
         initial_status = "pending"
 
+        requires_clarification = False
+        clarification_question = None
+
         command_text = command
         if command_text:
             plan_response = self.planner.process_command(CommandRequest(text=command_text))
             intent = plan_response.intent
             message = plan_response.message
+            requires_clarification = bool(getattr(plan_response, "requires_clarification", False))
+            clarification_question = getattr(plan_response, "clarification_question", None)
 
             steps = [
                 {
@@ -917,6 +1064,7 @@ class TaskOrchestrator:
                     "target": step.target,
                     "depends_on": getattr(step, "depends_on", []),
                     "expected_outcome": step.expected_outcome,
+                    "parameters": getattr(step, "parameters", {}),
                 }
                 for step in plan_response.steps
             ]
@@ -935,6 +1083,8 @@ class TaskOrchestrator:
             "intent": intent,
             "status": initial_status,
             "steps": steps,
+            "requires_clarification": requires_clarification,
+            "clarification_question": clarification_question,
             "current_step_index": 0,
             "active_action_id": None,
             "authorization": None,
@@ -997,6 +1147,8 @@ class TaskOrchestrator:
         for step_index, step_data in enumerate(steps):
             # Update current step index in task
             task["current_step_index"] = step_index
+        for step_idx, step_data in enumerate(steps):
+            task["current_step_index"] = step_idx
             action_name = step_data.get("action", "")
             target = step_data.get("target", "")
             step_id = step_data.get("step_id", 1)
@@ -1027,8 +1179,15 @@ class TaskOrchestrator:
                 self._persist_task(task_id)
                 return task
 
-            # Mark running state
-            self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
+            # Mark running state (skip redundant transition if already running on multi-step)
+            if task["status"] != "running":
+                self.state_machine.transition(task, "running", f"Executing '{action_name}' on '{target}'.")
+            else:
+                task["timeline"].append({
+                    "timestamp": current_iso_timestamp(),
+                    "state": "running",
+                    "message": f"Step {step_idx + 1}/{len(steps)}: Executing '{action_name}' on '{target}'.",
+                })
             task["started_at"] = task["started_at"] or current_iso_timestamp()
 
             plan_step = PlanStep(
@@ -1059,20 +1218,30 @@ class TaskOrchestrator:
             task["active_action_id"] = exec_result.action_id
 
             if exec_result.status == "completed":
-                self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
                 task["active_action_id"] = None
                 task["result"] = exec_result.to_dict()
                 task["verification"] = exec_result.verification.to_dict() if exec_result.verification else None
                 task["audit"] = exec_result.audit.to_dict() if exec_result.audit else None
                 task["duration_ms"] = exec_result.duration_ms
                 task["completed_at"] = exec_result.completed_at
-                task["message"] = f"Action '{action_name}' completed and verified successfully."
-                self._persist_task(task_id)
-                # Update context for next step from verification details if present
-                if exec_result.verification and isinstance(exec_result.verification.details, dict):
-                    context = exec_result.verification.details
+
+                if step_idx == len(steps) - 1:
+                    self.state_machine.transition(task, "completed", f"Action '{action_name}' completed and verified.")
+                    if task.get("requires_clarification") and task.get("clarification_question"):
+                        task["message"] = task["clarification_question"]
+                    else:
+                        task["message"] = f"Action '{action_name}' completed and verified successfully."
                 else:
-                    context = {}
+                    task["message"] = f"Step {step_idx + 1}/{len(steps)} ('{action_name}') completed."
+
+                self._persist_task(task_id)
+                # Accumulate context across steps so captured/copied text persists through open_website -> clipboard_paste
+                if exec_result.verification and isinstance(exec_result.verification.details, dict):
+                    details = exec_result.verification.details
+                    context.update(details)
+                    captured = details.get("captured_text") or details.get("copied_text")
+                    if captured:
+                        context["text"] = captured
                 continue
 
             elif exec_result.status == "cancelled":
@@ -1116,6 +1285,8 @@ class TaskOrchestrator:
         for step_index, step_data in enumerate(steps):
             # Update current step index in task
             task["current_step_index"] = step_index
+        for step_idx, step_data in enumerate(steps):
+            task["current_step_index"] = step_idx
             action_name = step_data.get("action", "")
             target = step_data.get("target", "")
             step_id = step_data.get("step_id", 1)

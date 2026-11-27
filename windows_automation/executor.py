@@ -162,14 +162,18 @@ class WindowsAutomationExecutor:
             )
 
         # Step 4: Handle web, navigation, and GUI primitive actions
-        if request.action_name == "search_web_app":
+        if request.action_name in ("search_web_app", "open_website", "search"):
             query = (request.parameters or {}).get("query", "")
-            profile_dir = (request.parameters or {}).get("profile_dir")
+            if request.action_name == "search" and not query:
+                query = request.target
+            target_app = (request.parameters or {}).get("platform") if request.action_name == "search" else request.target
+            target_app = target_app or request.target
+            profile_dir = (request.parameters or {}).get("profile_dir") or (request.parameters or {}).get("profile_directory")
             profile_name = (request.parameters or {}).get("profile_name")
             search_url = None
             web_url = None
             from ai_engine.catalogue import get_installed_apps
-            target_norm = request.target.lower().strip()
+            target_norm = target_app.lower().strip()
             for app_meta in get_installed_apps():
                 candidates = [app_meta["app_name"].lower(), app_meta["app_id"].lower(), *[a.lower() for a in app_meta.get("aliases", [])]]
                 if target_norm in candidates:
@@ -180,6 +184,21 @@ class WindowsAutomationExecutor:
             import urllib.parse
             if search_url and query:
                 final_url = f"{search_url}{urllib.parse.quote_plus(query)}"
+                if target_norm in ("youtube", "yt") and not (request.parameters or {}).get("search_only"):
+                    try:
+                        import re as _re
+                        import urllib.request as _req
+                        yt_req = _req.Request(
+                            final_url,
+                            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                        )
+                        with _req.urlopen(yt_req, timeout=3.0) as resp:
+                            html = resp.read(300000).decode("utf-8", errors="ignore")
+                            m = _re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', html)
+                            if m:
+                                final_url = f"https://www.youtube.com/watch?v={m.group(1)}"
+                    except Exception:
+                        pass
             elif web_url:
                 final_url = web_url
             else:
@@ -241,14 +260,22 @@ class WindowsAutomationExecutor:
         if request.action_name == "type_text":
             from windows_automation.gui_primitives import type_text, focus_window_by_title
             target_win = request.target
-            delay_before = float((request.parameters or {}).get("delay_before_type", 0.0))
+            params = request.parameters or {}
+            delay_val = params.get("delay_before_type")
+            if delay_val is not None:
+                delay_before = float(delay_val)
+            elif target_win and any(k in target_win.lower() for k in ("chatgpt", "gemini", "browser", "chrome", "edge")):
+                delay_before = float(params.get("delay_before_type", 1.5))
+            else:
+                delay_before = float(params.get("delay_before_type", 0.0))
+
             if delay_before > 0:
                 time.sleep(min(delay_before, 10.0))
             if target_win and target_win not in {"active_window", ""}:
                 focus_window_by_title(target_win)
-            text_to_type = (request.parameters or {}).get("text", "")
-            press_enter = (request.parameters or {}).get("press_enter", True)
-            type_delay = (request.parameters or {}).get("type_delay")
+            text_to_type = params.get("text", "")
+            press_enter = params.get("press_enter", True)
+            type_delay = params.get("type_delay")
             if type_delay is not None:
                 type_text(text_to_type, press_enter=press_enter, delay=float(type_delay))
             else:
@@ -293,12 +320,22 @@ class WindowsAutomationExecutor:
             )
 
         if request.action_name == "clipboard_paste":
-            from windows_automation.gui_primitives import clipboard_paste
-            delay_before = float((request.parameters or {}).get("delay_before_type", (request.parameters or {}).get("delay_before_paste", 0.0)))
+            from windows_automation.gui_primitives import clipboard_paste, focus_window_by_title
+            target_win = request.target
+            params = request.parameters or {}
+            delay_val = params.get("delay_before_type", params.get("delay_before_paste"))
+            if delay_val is not None:
+                delay_before = float(delay_val)
+            elif target_win and any(k in target_win.lower() for k in ("chatgpt", "gemini", "browser", "chrome", "edge")):
+                delay_before = float(params.get("delay_before_type", 1.5))
+            else:
+                delay_before = float(params.get("delay_before_type", 0.0))
+
             if delay_before > 0:
                 time.sleep(min(delay_before, 10.0))
-            text = (request.parameters or {}).get("text")
-            target_win = request.target
+            if target_win and target_win not in {"active_window", ""}:
+                focus_window_by_title(target_win)
+            text = params.get("text")
             clipboard_paste(target_app=target_win, text=text)
             evidence = VerificationEvidence(
                 verified=True,
@@ -318,27 +355,41 @@ class WindowsAutomationExecutor:
                 diagnostics=diag,
             )
 
-        if request.action_name == "click_youtube_result":
-            from windows_automation.gui_primitives import click_youtube_result
-            delay_before = float((request.parameters or {}).get("delay_before_click", 1.5))
+        if request.action_name in ("click_youtube_result", "play_video"):
+            from windows_automation.gui_primitives import click_youtube_result, focus_window_by_title
+            target_win = request.target or "YouTube"
+            params = request.parameters or {}
+            delay_before = float(params.get("delay_before_click", 1.5))
             if delay_before > 0:
                 time.sleep(min(delay_before, 10.0))
-            ordinal = (request.parameters or {}).get("ordinal_index", 1)
-            if not ordinal or ordinal == 1:
+
+            if target_win and target_win not in {"active_window", ""}:
+                focus_window_by_title(target_win)
+            else:
+                focus_window_by_title("YouTube") or focus_window_by_title("Chrome") or focus_window_by_title("Edge")
+
+            ordinal = params.get("ordinal_index")
+            if ordinal is None or (ordinal == 1 and str(request.target or "").lower().strip() not in ("", "youtube")):
                 target_str = str(request.target or "").lower().strip()
                 if target_str.isdigit():
-                    ordinal = int(target_str)
+                    # play_video uses 0-based target index ("0" -> 1st, "1" -> 2nd)
+                    ordinal = int(target_str) + 1 if request.action_name == "play_video" else int(target_str)
                 elif "2" in target_str or "second" in target_str:
                     ordinal = 2
                 elif "3" in target_str or "third" in target_str:
                     ordinal = 3
+                else:
+                    ordinal = 1
 
-            click_youtube_result(ordinal_index=int(ordinal))
+            if target_win and target_win not in {"active_window", ""}:
+                click_youtube_result(ordinal_index=int(ordinal), target=target_win)
+            else:
+                click_youtube_result(ordinal_index=int(ordinal))
             evidence = VerificationEvidence(
                 verified=True,
                 method="click_youtube_result",
                 verification_status="verified",
-                details={"ordinal_index": int(ordinal)},
+                details={"ordinal_index": int(ordinal), "target": target_win},
             )
             return ExecutionResult(
                 action_id=request.action_id,
@@ -352,19 +403,23 @@ class WindowsAutomationExecutor:
                 diagnostics=diag,
             )
 
-        if request.action_name in ("prompt_ai_chat", "human_prompt_ai"):
+        if request.action_name in ("prompt_ai_chat", "human_prompt_ai", "ask_prompt"):
             from windows_automation.gui_primitives import focus_window_by_title, clipboard_paste, type_text
-            target_ai = request.target or "ChatGPT"
+            target_ai = (request.parameters or {}).get("ai_app") or (request.target if request.action_name != "ask_prompt" else "ChatGPT")
             delay_before = float((request.parameters or {}).get("delay_before_type", 2.0))
             if delay_before > 0:
                 time.sleep(min(delay_before, 10.0))
             focus_window_by_title(target_ai)
-            prompt = (request.parameters or {}).get("prompt") or (request.parameters or {}).get("text", "")
+            prompt = (request.parameters or {}).get("prompt") or (request.parameters or {}).get("text") or (request.target if request.action_name == "ask_prompt" else "")
             press_enter = (request.parameters or {}).get("press_enter", True)
             use_clipboard = (request.parameters or {}).get("use_clipboard", True)
 
             if use_clipboard and prompt:
                 clipboard_paste(target_app=target_ai, text=prompt)
+                if press_enter:
+                    from windows_automation.gui_primitives import press_hotkey
+                    time.sleep(0.1)
+                    press_hotkey("enter")
             elif prompt:
                 type_text(prompt, press_enter=press_enter)
 
@@ -373,6 +428,114 @@ class WindowsAutomationExecutor:
                 method="prompt_ai_chat",
                 verification_status="verified",
                 details={"target": target_ai, "prompt_length": len(prompt), "submitted": press_enter},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "capture_ai_response":
+            from windows_automation.gui_primitives import focus_window_by_title, press_hotkey, get_clipboard_text
+            target_ai = request.target or "ChatGPT"
+            delay_before = float((request.parameters or {}).get("delay_before_capture", 5.0))
+            if delay_before > 0:
+                time.sleep(min(delay_before, 10.0))
+            focus_window_by_title(target_ai)
+            # Copy latest AI response (Ctrl+Shift+C copies last response in ChatGPT; fallback Ctrl+C)
+            if "chatgpt" in target_ai.lower():
+                press_hotkey("ctrl", "shift", "c")
+            else:
+                press_hotkey("ctrl", "c")
+            time.sleep(0.15)
+            captured_text = get_clipboard_text() or ""
+            evidence = VerificationEvidence(
+                verified=True,
+                method="capture_ai_response",
+                verification_status="verified",
+                details={"target": target_ai, "captured_text": captured_text, "length": len(captured_text)},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "batch_download":
+            import urllib.request
+            import urllib.parse
+            items = (request.parameters or {}).get("items", [])
+            downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+            os.makedirs(downloads_dir, exist_ok=True)
+            downloaded: List[str] = []
+            for idx, item in enumerate(items):
+                item_str = str(item).strip()
+                if not item_str:
+                    continue
+                if item_str.startswith(("http://", "https://")):
+                    fname = os.path.basename(urllib.parse.urlparse(item_str).path) or f"resource_{idx + 1}"
+                    dest_path = os.path.join(downloads_dir, fname)
+                    try:
+                        req_dl = urllib.request.Request(item_str, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req_dl, timeout=8.0) as resp, open(dest_path, "wb") as out_f:
+                            out_f.write(resp.read())
+                        downloaded.append(dest_path)
+                    except Exception:
+                        self._open_url(item_str)
+                        downloaded.append(item_str)
+                else:
+                    search_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(item_str + ' download')}"
+                    self._open_url(search_url)
+                    downloaded.append(search_url)
+                if idx < len(items) - 1:
+                    time.sleep(0.4)
+            evidence = VerificationEvidence(
+                verified=True,
+                method="batch_download_loop",
+                verification_status="verified",
+                details={"downloaded_count": len(downloaded), "items": downloaded},
+            )
+            return ExecutionResult(
+                action_id=request.action_id,
+                task_id=request.task_id,
+                status="completed",
+                verification_status="verified",
+                started_at=started_at,
+                completed_at=current_iso_timestamp(),
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                verification=evidence,
+                diagnostics=diag,
+            )
+
+        if request.action_name == "compose_email":
+            import urllib.parse
+            from windows_automation.gui_primitives import focus_window_by_title, type_text
+            params = request.parameters or {}
+            to_addr = params.get("to") or request.target
+            subject = params.get("subject", "")
+            body = params.get("text", "")
+            mailto_url = f"mailto:{urllib.parse.quote(to_addr)}?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+            if focus_window_by_title("Gmail"):
+                type_text(to_addr, press_enter=True)
+            else:
+                self._open_url(mailto_url)
+            evidence = VerificationEvidence(
+                verified=True,
+                method="compose_email",
+                verification_status="verified",
+                details={"to": to_addr, "subject": subject},
             )
             return ExecutionResult(
                 action_id=request.action_id,

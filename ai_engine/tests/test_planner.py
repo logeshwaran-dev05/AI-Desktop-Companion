@@ -344,13 +344,9 @@ class TestTaskPlanner(unittest.TestCase):
                 )
 
     # --------------------------------------------------
-    # Deferred website-search tests
+    # Website-search & multi-step human-activity tests
     # --------------------------------------------------
-    # Website discovery and search API functionality is
-    # currently paused. These tests are retained for future
-    # development but are not part of the active test suite.
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_youtube_search_and_play_second_video(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -371,7 +367,6 @@ class TestTaskPlanner(unittest.TestCase):
         self.assertEqual(response.steps[1].depends_on, [1])
         self.assertEqual(response.steps[2].depends_on, [2])
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_chatgpt_open_and_ask_prompt(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -390,7 +385,6 @@ class TestTaskPlanner(unittest.TestCase):
             "explain artificial intelligence"
         )
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_youtube_profile_and_search(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -418,7 +412,6 @@ class TestTaskPlanner(unittest.TestCase):
             1
         )
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_youtube_steps_are_ordered(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -435,7 +428,6 @@ class TestTaskPlanner(unittest.TestCase):
             [[], [1], [2]]
         )
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_youtube_play_without_video_number(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -449,7 +441,6 @@ class TestTaskPlanner(unittest.TestCase):
             "clarification_required"
         )
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_play_believer_on_youtube(self):
         response = self.planner.process_command(
             CommandRequest(text="play believer on youtube")
@@ -472,7 +463,6 @@ class TestTaskPlanner(unittest.TestCase):
         )
         self.assertEqual(response.entities.application, "YouTube")
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_search_python_tutorials_on_google(self):
         response = self.planner.process_command(
             CommandRequest(text="search python tutorials on google")
@@ -495,7 +485,6 @@ class TestTaskPlanner(unittest.TestCase):
         )
         self.assertEqual(response.entities.application, "Google")
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_multi_word_search_query_youtube(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -511,7 +500,6 @@ class TestTaskPlanner(unittest.TestCase):
             {"query": "bohemian rhapsody remastered"}
         )
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_multi_word_search_query_google(self):
         response = self.planner.process_command(
             CommandRequest(
@@ -527,7 +515,6 @@ class TestTaskPlanner(unittest.TestCase):
             {"query": "python tutorials for beginners"}
         )
 
-    @unittest.skip("Website-search functionality is currently deferred")
     def test_missing_search_query(self):
         for command in [
             "search on google",
@@ -555,6 +542,124 @@ class TestTaskPlanner(unittest.TestCase):
             )
         )
         self.assertEqual(response.status, "unsupported")
+
+    # --------------------------------------------------
+    # Day-to-day human-activity multi-step tests
+    # --------------------------------------------------
+
+    def test_ask_gemini_prompt(self):
+        response = self.planner.process_command(
+            CommandRequest(text="ask gemini to explain quantum computing")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "multi_step")
+        self.assertEqual(len(response.steps), 2)
+        self.assertEqual(response.steps[0].action, "open_website")
+        self.assertEqual(response.steps[0].target, "gemini")
+        self.assertEqual(response.steps[1].action, "ask_prompt")
+        self.assertEqual(response.steps[1].target, "explain quantum computing")
+        self.assertEqual(response.steps[1].depends_on, [1])
+
+    def test_ask_gpt_and_paste_in_notepad(self):
+        response = self.planner.process_command(
+            CommandRequest(text="ask gpt to write a leave letter and paste in notepad")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "multi_step")
+        self.assertEqual(len(response.steps), 4)
+        self.assertEqual(response.steps[0].action, "open_website")
+        self.assertEqual(response.steps[1].action, "ask_prompt")
+        self.assertEqual(response.steps[1].target, "write a leave letter")
+        self.assertEqual(response.steps[2].action, "capture_ai_response")
+        self.assertEqual(response.steps[3].action, "clipboard_paste")
+        self.assertEqual(response.steps[3].target, "notepad")
+
+    def test_open_notepad_and_type(self):
+        response = self.planner.process_command(
+            CommandRequest(text="open notepad and type hello team")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "multi_step")
+        self.assertEqual(len(response.steps), 2)
+        self.assertEqual(response.steps[0].action, "open_application")
+        self.assertEqual(response.steps[0].target, "Notepad")
+        self.assertEqual(response.steps[1].action, "type_text")
+        self.assertEqual(response.steps[1].parameters["text"], "hello team")
+
+    def test_copy_from_chrome_and_paste_in_notepad(self):
+        response = self.planner.process_command(
+            CommandRequest(text="copy from chrome and paste in notepad")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "multi_step")
+        self.assertEqual(len(response.steps), 2)
+        self.assertEqual(response.steps[0].action, "clipboard_copy")
+        self.assertEqual(response.steps[0].target, "chrome")
+        self.assertEqual(response.steps[1].action, "clipboard_paste")
+        self.assertEqual(response.steps[1].target, "notepad")
+
+    def test_press_hotkey_and_navigate_url(self):
+        hk_res = self.planner.process_command(CommandRequest(text="press ctrl+c"))
+        self.assertEqual(hk_res.status, "plan_ready")
+        self.assertEqual(hk_res.steps[0].action, "press_hotkey")
+        self.assertEqual(hk_res.steps[0].parameters["keys"], ["ctrl", "c"])
+
+        url_res = self.planner.process_command(CommandRequest(text="go to github.com"))
+        self.assertEqual(url_res.status, "plan_ready")
+        self.assertEqual(url_res.steps[0].action, "navigate_url")
+        self.assertEqual(url_res.steps[0].target, "https://github.com")
+
+    def test_ask_gpt_email_drafts_pastes_and_asks_recipient(self):
+        response = self.planner.process_command(
+            CommandRequest(text="ask gpt to write an email to my manager")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(response.intent, "multi_step")
+        self.assertEqual(len(response.steps), 5)
+        self.assertEqual(
+            [s.action for s in response.steps],
+            ["open_website", "ask_prompt", "capture_ai_response", "open_website", "clipboard_paste"],
+        )
+        self.assertEqual(response.steps[3].target, "gmail")
+        self.assertTrue(response.requires_clarification)
+        self.assertIn("whom", (response.clarification_question or "").lower())
+
+    def test_ask_gpt_email_with_recipient_address(self):
+        response = self.planner.process_command(
+            CommandRequest(text="ask gpt to write an email to hr@company.com")
+        )
+        self.assertEqual(response.status, "plan_ready")
+        self.assertEqual(len(response.steps), 6)
+        self.assertEqual(response.steps[5].action, "compose_email")
+        self.assertEqual(response.steps[5].target, "hr@company.com")
+        self.assertFalse(response.requires_clarification)
+
+    def test_loop_download_resources_and_clarification(self):
+        res_ok = self.planner.process_command(
+            CommandRequest(text="loop download https://example.com/a.pdf, https://example.com/b.pdf")
+        )
+        self.assertEqual(res_ok.status, "plan_ready")
+        self.assertEqual(res_ok.intent, "batch_download")
+        self.assertEqual(res_ok.steps[0].action, "batch_download")
+        self.assertEqual(len(res_ok.steps[0].parameters["items"]), 2)
+
+        res_missing = self.planner.process_command(CommandRequest(text="loop download"))
+        self.assertEqual(res_missing.status, "clarification_required")
+        self.assertTrue(res_missing.requires_clarification)
+
+    def test_whatsapp_messaging_and_clarification(self):
+        res_ok = self.planner.process_command(
+            CommandRequest(text="message Mom on whatsapp saying I reached safely")
+        )
+        self.assertEqual(res_ok.status, "plan_ready")
+        self.assertEqual(res_ok.steps[0].action, "open_application")
+        self.assertEqual(res_ok.steps[1].action, "type_text")
+        self.assertEqual(res_ok.steps[1].parameters["text"], "I reached safely")
+
+        res_missing = self.planner.process_command(
+            CommandRequest(text="message Mom on whatsapp")
+        )
+        self.assertEqual(res_missing.status, "clarification_required")
 
 
 if __name__ == "__main__":
