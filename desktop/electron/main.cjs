@@ -432,6 +432,9 @@ ipcMain.handle('companion:get-current-version', () => {
 
 ipcMain.handle('companion:relaunch-app', () => {
   console.log('[Electron] Relaunching application to apply updates...');
+  if (pythonBackendProcess && !pythonBackendProcess.killed) {
+    try { pythonBackendProcess.kill(); } catch {}
+  }
   app.relaunch();
   app.exit(0);
 });

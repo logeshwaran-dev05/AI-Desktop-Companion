@@ -52,6 +52,9 @@ if user32:
     if hasattr(user32, "SetCursorPos"):
         user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
         user32.SetCursorPos.restype = wintypes.BOOL
+    if hasattr(user32, "SendInput"):
+        user32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
+        user32.SendInput.restype = wintypes.UINT
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -143,8 +146,18 @@ def press_vk_key(vk_code: int) -> None:
 def type_text(text: str, press_enter: bool = True, delay: float = 0.01) -> None:
     """
     Type a string into the currently focused window with optional trailing Enter.
-    Handles Unicode, punctuation, and multi-line text safely.
+    Uses Win32 Unicode clipboard paste for multi-character strings when delay > 0
+    to guarantee 100% exact character fidelity on Windows 11 WinUI apps (Notepad, etc.),
+    falling back to SendInput Unicode events.
     """
+    if delay > 0 and len(text) > 2 and set_clipboard_text(text):
+        time.sleep(0.05)
+        press_hotkey("ctrl", "v")
+        if press_enter:
+            time.sleep(0.05)
+            press_vk_key(VK_CODES["enter"])
+        return
+
     for ch in text:
         if ch == "\n":
             press_vk_key(VK_CODES["enter"])

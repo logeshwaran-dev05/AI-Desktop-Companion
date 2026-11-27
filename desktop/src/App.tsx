@@ -687,6 +687,7 @@ export default function App() {
           query,
           actionType,
           rawCommand,
+          query: intent?.query,
           pathChoice: specificChoice?.path,
           targetKind,
         })
