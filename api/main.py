@@ -393,6 +393,9 @@ def get_task_result(task_id: str):
         "application_id": task.get("application_id"),
         "structured_request": task.get("structured_request"),
         "completed_at": task.get("completed_at"),
+        "requires_clarification": task.get("requires_clarification"),
+        "clarification_question": task.get("clarification_question"),
+        "steps": task.get("steps"),
     }
 
 
@@ -539,6 +542,9 @@ def run_command(request: CommandRunRequest):
         "application_id": task.get("application_id"),
         "structured_request": task.get("structured_request"),
         "completed_at": task.get("completed_at"),
+        "requires_clarification": task.get("requires_clarification"),
+        "clarification_question": task.get("clarification_question"),
+        "steps": task.get("steps"),
     }
 
 

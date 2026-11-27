@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const { launchApp, APP_REGISTRY, waitForProcess } = require('./appLauncher.cjs');
 const {
@@ -19,7 +21,31 @@ const { checkForUpdates, downloadAndApplyUpdate, getCurrentVersion, FALLBACK_MAN
 let dashboardWindow = null;
 let avatarWindow = null;
 let tray = null;
+let pythonBackendProcess = null;
 app.isQuitting = false;
+
+function ensurePythonBackendRunning() {
+  const req = http.get('http://127.0.0.1:8000/openapi.json', { timeout: 1200 }, (res) => {
+    res.resume();
+    console.log('[Backend] Python automation API already running on port 8000.');
+  });
+  req.on('error', () => {
+    try {
+      const repoRoot = path.join(__dirname, '..', '..');
+      console.log('[Backend] Starting Python automation API on port 8000 from:', repoRoot);
+      pythonBackendProcess = spawn('python', ['-m', 'uvicorn', 'api.main:app', '--host', '127.0.0.1', '--port', '8000'], {
+        cwd: repoRoot,
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      pythonBackendProcess.on('error', (err) => {
+        console.warn('[Backend] Failed to spawn Python API:', err.message);
+      });
+    } catch (e) {
+      console.warn('[Backend] Spawn error:', e.message);
+    }
+  });
+}
 
 // Ensure single instance of the application
 const gotTheLock = app.requestSingleInstanceLock();
@@ -1149,6 +1175,7 @@ ipcMain.handle('companion:sync-state', (_event, data) => {
 
 app.whenReady().then(() => {
   console.log('[Electron] Application ready. Initializing Dashboard, Avatar, and System Tray...');
+  ensurePythonBackendRunning();
   createDashboardWindow();
   createAvatarWindow();
   createTray();
@@ -1181,6 +1208,14 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+});
+
+app.on('before-quit', () => {
+  if (pythonBackendProcess && !pythonBackendProcess.killed) {
+    try {
+      pythonBackendProcess.kill();
+    } catch {}
+  }
 });
 
 app.on('window-all-closed', () => {

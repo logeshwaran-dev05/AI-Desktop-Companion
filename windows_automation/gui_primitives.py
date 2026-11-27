@@ -167,7 +167,7 @@ def press_hotkey(*keys: str) -> None:
     if not user32:
         return
 
-    vk_list = [VK_CODES.get(k.lower(), ord(k.upper())) for k in keys]
+    vk_list = [VK_CODES[k.lower()] if k.lower() in VK_CODES else ord(k.upper()[0]) for k in keys]
 
     # Key down all
     for vk in vk_list:
@@ -331,12 +331,15 @@ def clipboard_paste(target_app: Optional[str] = None, text: Optional[str] = None
     return True
 
 
-def click_youtube_result(ordinal_index: int = 1) -> bool:
+def click_youtube_result(ordinal_index: int = 1, target: Optional[str] = None) -> bool:
     """
     Focuses the YouTube/browser window and clicks the N-th video in search results.
     ordinal_index: 1-based index (e.g. 1 for 1st video, 2 for 2nd video).
     """
-    focus_window_by_title("YouTube") or focus_window_by_title("Chrome") or focus_window_by_title("Edge")
+    if target and target not in {"active_window", ""}:
+        focus_window_by_title(target)
+    else:
+        focus_window_by_title("YouTube") or focus_window_by_title("Chrome") or focus_window_by_title("Edge")
     time.sleep(0.5)
 
     idx = max(1, int(ordinal_index))

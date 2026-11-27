@@ -618,9 +618,68 @@ export default function App() {
     setAvatarState('Working')
     updateProgressStage('launch_attempted', 'in_progress', `Doraemon physically moving across desktop to ${displayName}…`, 85)
 
-    let taskResult: import('./companion').DesktopTaskResult
+    let taskResult: import('./companion').DesktopTaskResult | null = null
 
-    if (window.companionAPI?.startDesktopTask) {
+    const isHumanActivityCmd =
+      !specificChoice &&
+      /\b(ask|tell|prompt|loop\s+download|batch\s+download|download\s+all|copy|paste|press|hit|message|e-?mail|mail|go\s+to|visit)\b|\band\s+(?:type|write|enter|ask|click|play|paste)\b|^[\w.+-]+@[\w-]+\.[\w.-]+$/i.test(
+        rawText.trim()
+      )
+
+    if (isHumanActivityCmd) {
+      try {
+        const normalizedCmd = /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(rawText.trim())
+          ? `send an email to ${rawText.trim()}`
+          : rawText.trim()
+        const backendResp = await fetch('http://127.0.0.1:8000/tasks/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: normalizedCmd,
+            auto_approve: true,
+            timeout_seconds: 30,
+          }),
+        })
+        if (backendResp.ok) {
+          const data = await backendResp.json()
+          if (data && (data.status === 'completed' || data.requires_clarification)) {
+            const outputText =
+              data.result?.output_text ||
+              data.result?.verification?.details?.captured_text ||
+              data.result?.verification?.details?.copied_text ||
+              ''
+            const replyMsg =
+              data.clarification_question ||
+              data.message ||
+              `Completed ${data.steps?.length || 1}-step workflow.`
+            taskResult = {
+              success: true,
+              verified: true,
+              displayName: data.selected_application || displayName,
+              mode: 'real',
+              taskState: 'success',
+              executionMode: 'real',
+              targetInfo: {
+                foundShortcut: true,
+                shortcutPath: null,
+                destination: { x: 0, y: 0 },
+                destinationType: 'taskbar-fallback',
+                explanation: outputText ? `${replyMsg}\n\n📋 Captured Output:\n${outputText}` : replyMsg,
+              },
+            }
+            if (data.requires_clarification && data.clarification_question) {
+              voiceService.speakResponse(data.clarification_question)
+            }
+          }
+        }
+      } catch (backendErr) {
+        console.warn('[App] Python multi-step backend unreachable, falling back to Electron launcher:', backendErr)
+      }
+    }
+
+    if (taskResult) {
+      // Handled by Python multi-step orchestrator
+    } else if (window.companionAPI?.startDesktopTask) {
       try {
         taskResult = await window.companionAPI.startDesktopTask({
           appId,
@@ -812,21 +871,37 @@ export default function App() {
         latestSpeechRef.current = text
         clearVoiceAutoEndTimer()
 
-        if (isFinal) {
-          voiceService.stopListening()
-          setIsVoiceRecording(false)
-          setAudioLevel(0)
+        const dispatchVoiceCommand = (rawCmd: string) => {
+          const cmd = rawCmd.trim()
+          if (!cmd) return
+
+          // Allow hands-free voice command to turn off the always-on mic intentionally
+          if (/^(stop listening|turn off mic|mute mic|mic off|go to sleep)$/i.test(cmd)) {
+            voiceService.stopListening()
+            setIsVoiceRecording(false)
+            setAudioLevel(0)
+            setVoiceTranscript('')
+            setMessage('')
+            latestSpeechRef.current = ''
+            setAvatarState('Idle')
+            return
+          }
+
+          // Keep mic ON continuously for the next voice command!
+          latestSpeechRef.current = ''
+          setVoiceTranscript('')
+          setMessage('')
           setAvatarState('Thinking')
-          handleLaunchApp(text)
+          handleLaunchApp(cmd)
+        }
+
+        if (isFinal) {
+          dispatchVoiceCommand(text)
         } else {
           voiceAutoEndTimerRef.current = setTimeout(() => {
             const finalCmd = latestSpeechRef.current.trim()
             if (finalCmd) {
-              voiceService.stopListening()
-              setIsVoiceRecording(false)
-              setAudioLevel(0)
-              setAvatarState('Thinking')
-              handleLaunchApp(finalCmd)
+              dispatchVoiceCommand(finalCmd)
             }
           }, 1300)
         }
@@ -840,7 +915,7 @@ export default function App() {
       onError: (err) => {
         clearVoiceAutoEndTimer()
         if (err.type === 'network') {
-          setNotice('🎤 Microphone listening... Speak your command.')
+          setNotice('🎤 Always-on microphone listening... Speak your command.')
           setAvatarState('Listening')
         } else {
           setVoiceError(err.message)
@@ -849,17 +924,10 @@ export default function App() {
         }
       },
       onEnd: () => {
-        if (window.companionAPI?.isElectron) return
         clearVoiceAutoEndTimer()
         setIsVoiceRecording(false)
         setAudioLevel(0)
-        const pending = latestSpeechRef.current.trim()
-        if (pending && launchState === 'idle') {
-          setAvatarState('Thinking')
-          handleLaunchApp(pending)
-        } else {
-          setAvatarState((prev) => (prev === 'Listening' ? 'Idle' : prev))
-        }
+        setAvatarState((prev) => (prev === 'Listening' ? 'Idle' : prev))
       },
     })
 
@@ -868,7 +936,7 @@ export default function App() {
       setIsVoiceRecording(false)
       setAvatarState('Idle')
     }
-  }, [clearVoiceAutoEndTimer, handleLaunchApp, isVoiceRecording, launchState])
+  }, [clearVoiceAutoEndTimer, handleLaunchApp, isVoiceRecording])
 
   // ── Voice Testing & Diagnostic Helpers ──────────────────────────────────────
   const toggleMicTest = useCallback(async () => {
@@ -1027,9 +1095,9 @@ export default function App() {
   function sendMessage() {
     clearVoiceAutoEndTimer()
     if (isVoiceRecording) {
-      voiceService.stopListening()
-      setIsVoiceRecording(false)
-      setAudioLevel(0)
+      // Keep always-on mic active; just reset pending speech buffer
+      latestSpeechRef.current = ''
+      setVoiceTranscript('')
     }
     const text = message.trim()
     if (!text || isSleeping) return

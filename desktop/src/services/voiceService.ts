@@ -176,8 +176,9 @@ class VoiceService {
         let finalTranscript = '';
         let interimTranscript = '';
 
-        // Iterate through all results to build full continuous speech
-        for (let i = 0; i < event.results.length; ++i) {
+        // Start from event.resultIndex so always-on continuous sessions only emit new speech
+        const startIdx = typeof event.resultIndex === 'number' ? event.resultIndex : 0;
+        for (let i = startIdx; i < event.results.length; ++i) {
           const result = event.results[i];
           if (result && result[0]) {
             if (result.isFinal) {
@@ -243,9 +244,18 @@ class VoiceService {
 
       this.recognition.onend = () => {
         console.log('[VoiceService] SpeechRecognition session ended.');
-        if (this.isRecording && !isElectronEnv) {
-          // If ended unexpectedly while still in recording mode, finalize session
-          this.stopListening();
+        // Keep microphone always-on until the user explicitly turns it off via stopListening()
+        if (this.isRecording && this.recognition) {
+          setTimeout(() => {
+            if (this.isRecording && this.recognition) {
+              try {
+                this.recognition.start();
+              } catch (restartErr) {
+                console.warn('[VoiceService] Continuous restart notice:', restartErr);
+              }
+            }
+          }, 150);
+        } else {
           callbacks.onEnd();
         }
       };
