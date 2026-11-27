@@ -89,7 +89,7 @@ async function checkForUpdates() {
 
   try {
     remoteInfo = await fetchJson(PRIMARY_VERSION_URL);
-  } catch (err1) {
+  } catch {
     try {
       remoteInfo = await fetchJson(FALLBACK_VERSION_URL);
     } catch (err2) {

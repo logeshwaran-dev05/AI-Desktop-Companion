@@ -125,6 +125,17 @@ class ApplicationDiscoverer:
             "app_type": "executable",
             "launch_method": "subprocess_executable",
         },
+        {
+            "display_name": "Spotify",
+            "executable_name": "spotify.exe",
+            "aliases": ["spotify", "music", "spotify music"],
+            "known_paths": [
+                os.path.expandvars(r"%APPDATA%\Spotify\Spotify.exe"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\Spotify.exe"),
+            ],
+            "app_type": "executable",
+            "launch_method": "subprocess_executable",
+        },
     ]
 
     def __init__(

@@ -603,6 +603,13 @@ function openBrowserUrl(url) {
  */
 function resolveYouTubeTopVideoUrl(query, fallbackUrl) {
   return new Promise((resolve) => {
+    let settled = false;
+    const safeResolve = (url) => {
+      if (settled) return;
+      settled = true;
+      resolve(url);
+    };
+
     const searchEndpoint = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
     const req = https.get(
       searchEndpoint,
@@ -616,162 +623,158 @@ function resolveYouTubeTopVideoUrl(query, fallbackUrl) {
       (res) => {
         if (res.statusCode !== 200) {
           res.resume();
-          resolve(fallbackUrl);
+          safeResolve(fallbackUrl);
           return;
         }
         let body = '';
         res.on('data', (chunk) => {
           body += chunk;
           // Early exit once we have enough HTML to find the first videoId
-          if (body.length > 250000) {
+          if (body.length > 250000 || body.includes('"videoId":')) {
             const match = body.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
             if (match && match[1]) {
               res.destroy();
-              resolve(`https://www.youtube.com/watch?v=${match[1]}`);
+              safeResolve(`https://www.youtube.com/watch?v=${match[1]}`);
             }
           }
         });
         res.on('end', () => {
           const match = body.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
           if (match && match[1]) {
-            resolve(`https://www.youtube.com/watch?v=${match[1]}`);
+            safeResolve(`https://www.youtube.com/watch?v=${match[1]}`);
           } else {
-            resolve(fallbackUrl);
+            safeResolve(fallbackUrl);
           }
         });
       }
     );
     req.on('timeout', () => {
       req.destroy();
-      resolve(fallbackUrl);
+      safeResolve(fallbackUrl);
     });
     req.on('error', () => {
-      resolve(fallbackUrl);
+      safeResolve(fallbackUrl);
     });
   });
 }
 
-function launchApp(appId, options = {}) {
-  return new Promise(async (resolve) => {
-    const rawTarget = (appId || '').trim();
-    const normalized = rawTarget.toLowerCase();
+async function launchApp(appId, options = {}) {
+  const rawTarget = (appId || '').trim();
+  const normalized = rawTarget.toLowerCase();
 
-    // 1. Find entry in registry by ID or alias
-    const appEntry = APP_REGISTRY.find(
-      (a) => a.id === normalized || (a.aliases && a.aliases.includes(normalized))
-    );
+  // 1. Find entry in registry by ID or alias
+  const appEntry = APP_REGISTRY.find(
+    (a) => a.id === normalized || (a.aliases && a.aliases.includes(normalized))
+  );
 
-    // 2. Handle known Web-first apps (e.g. YouTube, Netflix, ChatGPT)
-    if (appEntry && appEntry.type === 'web') {
-      let targetUrl = (options.query && appEntry.searchUrl)
-        ? `${appEntry.searchUrl}${encodeURIComponent(options.query)}`
-        : appEntry.webUrl;
+  // 2. Handle known Web-first apps (e.g. YouTube, Netflix, ChatGPT)
+  if (appEntry && appEntry.type === 'web') {
+    let targetUrl = (options.query && appEntry.searchUrl)
+      ? `${appEntry.searchUrl}${encodeURIComponent(options.query)}`
+      : appEntry.webUrl;
 
-      if (appEntry.id === 'youtube' && options.query) {
+    if (appEntry.id === 'youtube' && options.query) {
+      if (options.actionType === 'search') {
+        targetUrl = `${appEntry.searchUrl}${encodeURIComponent(options.query)}`;
+      } else {
         targetUrl = await resolveYouTubeTopVideoUrl(options.query, targetUrl);
       }
-
-      console.log(`[Launcher] Opening web app ${appEntry.displayName}: ${targetUrl}`);
-      await openBrowserUrl(targetUrl);
-
-      // Verify browser opened in tasklist
-      const verified = await waitForProcess(BROWSER_PROCESSES, 3000);
-      resolve({
-        success: true,
-        verified,
-        displayName: options.query ? `${appEntry.displayName}: "${options.query}"` : `${appEntry.displayName}`,
-        mode: 'real',
-      });
-      return;
     }
 
-    // 3. Handle Native or Hybrid apps (e.g. Notepad, Calculator, WhatsApp, Spotify)
-    if (appEntry) {
-      // If query is requested for a hybrid app like Spotify with searchUrl
-      if (options.query && appEntry.searchUrl) {
-        if (appEntry.id === 'spotify') {
-          exec(`cmd.exe /c start spotify:search:${encodeURIComponent(options.query)}`, { windowsHide: false }, () => {});
-          const isNative = await waitForProcess(appEntry.processNames, 1500);
-          if (isNative) {
-            resolve({
-              success: true,
-              verified: true,
-              displayName: `${appEntry.displayName}: "${options.query}"`,
-              mode: 'real',
-            });
-            return;
-          }
+    console.log(`[Launcher] Opening web app ${appEntry.displayName}: ${targetUrl}`);
+    await openBrowserUrl(targetUrl);
+
+    // Verify browser opened in tasklist
+    const verified = await waitForProcess(BROWSER_PROCESSES, 3000);
+    return {
+      success: true,
+      verified,
+      displayName: options.query ? `${appEntry.displayName}: "${options.query}"` : `${appEntry.displayName}`,
+      mode: 'real',
+    };
+  }
+
+  // 3. Handle Native or Hybrid apps (e.g. Notepad, Calculator, WhatsApp, Spotify)
+  if (appEntry) {
+    // If query is requested for a hybrid app like Spotify with searchUrl
+    if (options.query && appEntry.searchUrl) {
+      if (appEntry.id === 'spotify') {
+        exec(`cmd.exe /c start spotify:search:${encodeURIComponent(options.query)}`, { windowsHide: false }, () => { });
+        const isNative = await waitForProcess(appEntry.processNames, 1500);
+        if (isNative) {
+          return {
+            success: true,
+            verified: true,
+            displayName: `${appEntry.displayName}: "${options.query}"`,
+            mode: 'real',
+          };
         }
-        // Fallback to web search
-        const webSearchUrl = `${appEntry.searchUrl}${encodeURIComponent(options.query)}`;
-        await openBrowserUrl(webSearchUrl);
-        const isBrowserRunning = await waitForProcess(BROWSER_PROCESSES, 2500);
-        resolve({
-          success: true,
-          verified: isBrowserRunning,
-          displayName: `${appEntry.displayName}: "${options.query}"`,
-          mode: 'real',
-        });
-        return;
       }
+      // Fallback to web search
+      const webSearchUrl = `${appEntry.searchUrl}${encodeURIComponent(options.query)}`;
+      await openBrowserUrl(webSearchUrl);
+      const isBrowserRunning = await waitForProcess(BROWSER_PROCESSES, 2500);
+      return {
+        success: true,
+        verified: isBrowserRunning,
+        displayName: `${appEntry.displayName}: "${options.query}"`,
+        mode: 'real',
+      };
+    }
 
-      console.log(`[Launcher] Attempting native launch for ${appEntry.displayName}`);
-      exec(appEntry.launchCommand, { windowsHide: false }, () => {});
+    console.log(`[Launcher] Attempting native launch for ${appEntry.displayName}`);
+    exec(appEntry.launchCommand, { windowsHide: false }, () => { });
 
-      // Verify native process within 1.8 seconds
-      const isNativeRunning = await waitForProcess(appEntry.processNames, 1800);
+    // Verify native process within 1.8 seconds
+    const isNativeRunning = await waitForProcess(appEntry.processNames, 1800);
 
-      if (isNativeRunning) {
-        console.log(`[Launcher] Confirmed native ${appEntry.displayName} process is running!`);
-        resolve({
-          success: true,
-          verified: true,
-          displayName: appEntry.displayName,
-          mode: 'real',
-        });
-        return;
-      }
-
-      // If native failed and we have a web fallback (e.g. WhatsApp Web, Spotify Web)
-      if (appEntry.fallbackUrl) {
-        console.log(`[Launcher] Native ${appEntry.displayName} not found. Falling back to Web App: ${appEntry.fallbackUrl}`);
-        await openBrowserUrl(appEntry.fallbackUrl);
-        const isBrowserRunning = await waitForProcess(BROWSER_PROCESSES, 2500);
-
-        resolve({
-          success: true,
-          verified: isBrowserRunning,
-          displayName: `${appEntry.displayName} (Web Fallback)`,
-          mode: 'fallback-web',
-        });
-        return;
-      }
-
-      // Native utility verification timeout
-      resolve({
-        success: false,
-        verified: false,
+    if (isNativeRunning) {
+      console.log(`[Launcher] Confirmed native ${appEntry.displayName} process is running!`);
+      return {
+        success: true,
+        verified: true,
         displayName: appEntry.displayName,
         mode: 'real',
-        error: `Could not verify that ${appEntry.displayName} opened. It may not be installed on this Windows PC.`,
-      });
-      return;
+      };
     }
 
-    // 4. Universal Fallback: Unrecognized command -> Search Google
-    const queryTerm = options.query || rawTarget;
-    console.log(`[Launcher] No local app registered for "${rawTarget}". Triggering smart search fallback for: ${queryTerm}`);
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(queryTerm)}`;
-    await openBrowserUrl(searchUrl);
-    const browserVerified = await waitForProcess(BROWSER_PROCESSES, 2500);
+    // If native failed and we have a web fallback (e.g. WhatsApp Web, Spotify Web)
+    if (appEntry.fallbackUrl) {
+      console.log(`[Launcher] Native ${appEntry.displayName} not found. Falling back to Web App: ${appEntry.fallbackUrl}`);
+      await openBrowserUrl(appEntry.fallbackUrl);
+      const isBrowserRunning = await waitForProcess(BROWSER_PROCESSES, 2500);
 
-    resolve({
-      success: true,
-      verified: browserVerified,
-      displayName: `Google Search: "${queryTerm}"`,
-      mode: 'fallback-web',
-    });
-  });
+      return {
+        success: true,
+        verified: isBrowserRunning,
+        displayName: `${appEntry.displayName} (Web Fallback)`,
+        mode: 'fallback-web',
+      };
+    }
+
+    // Native utility verification timeout
+    return {
+      success: false,
+      verified: false,
+      displayName: appEntry.displayName,
+      mode: 'real',
+      error: `Could not verify that ${appEntry.displayName} opened. It may not be installed on this Windows PC.`,
+    };
+  }
+
+  // 4. Universal Fallback: Unrecognized command -> Search Google
+  const queryTerm = options.query || rawTarget;
+  console.log(`[Launcher] No local app registered for "${rawTarget}". Triggering smart search fallback for: ${queryTerm}`);
+  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(queryTerm)}`;
+  await openBrowserUrl(searchUrl);
+  const browserVerified = await waitForProcess(BROWSER_PROCESSES, 2500);
+
+  return {
+    success: true,
+    verified: browserVerified,
+    displayName: `Google Search: "${queryTerm}"`,
+    mode: 'fallback-web',
+  };
 }
 
 /**
@@ -798,4 +801,10 @@ function waitForProcess(processNames, timeoutMs = 2500) {
   });
 }
 
-module.exports = { launchApp, APP_ALLOWLIST, APP_REGISTRY };
+module.exports = {
+  launchApp,
+  APP_ALLOWLIST,
+  APP_REGISTRY,
+  waitForProcess,
+  verifyProcessRunning,
+};

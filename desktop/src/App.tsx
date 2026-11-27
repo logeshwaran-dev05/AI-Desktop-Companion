@@ -564,6 +564,8 @@ export default function App() {
     let appId = ''
     let displayName = rawText.trim()
     let rawCommand = rawText.trim()
+    let query = ''
+    let actionType: 'open' | 'play' | 'search' = 'open'
 
     if (specificChoice) {
       displayName = specificChoice.name
@@ -571,7 +573,9 @@ export default function App() {
     } else if (intent) {
       appId = intent.appId
       displayName = intent.displayName
-      rawCommand = intent.displayName
+      rawCommand = rawText.trim()
+      query = intent.query || ''
+      actionType = intent.actionType || 'open'
     } else {
       // Clean up common action prefixes (e.g. "open pokedex" -> "pokedex", "show folder Design thinking" -> "Design thinking")
       const cleaned = rawText
@@ -621,6 +625,8 @@ export default function App() {
         taskResult = await window.companionAPI.startDesktopTask({
           appId,
           displayName,
+          query,
+          actionType,
           rawCommand,
           pathChoice: specificChoice?.path,
           targetKind,
@@ -1139,14 +1145,14 @@ export default function App() {
                   </button>
                   <button
                     type="button"
-                    className="floating-action-btn"
+                    className="floating-action-btn floating-action-btn-icon"
                     onClick={() => {
                       setActiveTab('Avatar Settings')
                       if (window.companionAPI?.openDashboard) window.companionAPI.openDashboard()
                     }}
                     title="Avatar Settings"
                   >
-                    ⚙️ Settings
+                    ⚙️
                   </button>
                   <button
                     type="button"
@@ -1291,7 +1297,7 @@ export default function App() {
                         sendMessage()
                       }
                     }}
-                    placeholder='Ask Doraemon or type "Open Notepad"…'
+                    placeholder='Ask Doraemon or type an app…'
                     rows={1}
                     style={{
                       flex: 1,
@@ -1304,6 +1310,7 @@ export default function App() {
                       lineHeight: '1.4',
                       height: 38,
                       minHeight: 38,
+                      overflow: 'hidden',
                       overflowY: 'hidden',
                       resize: 'none',
                       outline: 'none',
