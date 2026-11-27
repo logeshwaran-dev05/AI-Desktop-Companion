@@ -1,9 +1,9 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "name": "JM Vertex AI Desktop Companion",
-  "releaseDate": "2026-11-26",
+  "releaseDate": "2026-11-27",
   "downloadUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/payload.zip",
   "setupExeUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/downloads/JM-Vertex-AI-Companion-Setup.exe",
   "fallbackWebUrl": "https://logeshwaran-dev05.github.io/AI-Desktop-Companion/",
-  "releaseNotes": "Wired Desktop UI & Electron main process directly to multi-step Python human-activity orchestrator (auto-starts backend on port 8000, executes ChatGPT/Gemini prompting, email paste + recipient follow-up, and loop downloads)."
+  "releaseNotes": "Exact text typing fix for Windows 11 Notepad & WinUI apps (uses Win32 Unicode clipboard paste + SendInput argtypes so zero characters are garbled or repeated)."
 }

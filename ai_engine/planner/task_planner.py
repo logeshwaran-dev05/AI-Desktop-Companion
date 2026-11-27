@@ -881,7 +881,7 @@ class TaskPlanner:
                 target=app_name,
                 depends_on=[1],
                 expected_outcome=f"Type text into {app_name}.",
-                parameters={"text": content, "press_enter": False, "delay_before_type": 1.5},
+                parameters={"text": content, "press_enter": False, "delay_before_type": 2.0},
             ),
         ]
 
