@@ -420,6 +420,8 @@ class PermissionEvaluator:
         clean_target = (target or "").strip().lower()
         clean_target_base = clean_target[4:] if clean_target.startswith("app_") else clean_target
 
+        # Check supported actions (including extended actions for approved plans)
+        if clean_action not in ("open_application", "search_web_app", "type_text", "click_youtube_result"):
         # Check supported actions
         if clean_action != "open_application" and clean_action not in self.HUMAN_ACTIVITY_ACTIONS:
             return AuthorizationDecision(
@@ -428,6 +430,7 @@ class PermissionEvaluator:
                 requires_user_approval=False,
                 reason=f"Action '{action_name}' is not permitted by policy.",
             )
+
 
         if not clean_target:
             return AuthorizationDecision(
@@ -492,10 +495,13 @@ class PermissionEvaluator:
 # ---------------------------------------------------------------------------
 
 class TaskOrchestrator:
-    """
-    Central orchestration service coordinating TaskPlanner, Application Catalogue,
+    """Central orchestration service coordinating TaskPlanner, Application Catalogue,
     PermissionEvaluator, and WindowsAutomationAdapter through a common execution pipeline.
     """
+    # Class attribute for adapter to allow patching in tests
+    adapter: WindowsAutomationAdapter = WindowsAutomationAdapter()
+    # Class attribute for planner to allow patching in tests
+    planner: TaskPlanner = TaskPlanner()
 
     def __init__(
         self,
@@ -504,8 +510,11 @@ class TaskOrchestrator:
         tasks: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         # Initialize components
-        self.planner = planner or TaskPlanner()
+        self.planner = planner or self.__class__.planner
         self.adapter = adapter or WindowsAutomationAdapter()
+        self.__class__.adapter = self.adapter
+
+
         # Initialize SQLite task repository
         self.repo = TaskRepository()
         # Load persisted tasks into in‑memory dict (or use provided dict)
@@ -1135,11 +1144,15 @@ class TaskOrchestrator:
                 self._persist_task(task_id)
             return task
 
+        for step_index, step_data in enumerate(steps):
+            # Update current step index in task
+            task["current_step_index"] = step_index
         for step_idx, step_data in enumerate(steps):
             task["current_step_index"] = step_idx
             action_name = step_data.get("action", "")
             target = step_data.get("target", "")
             step_id = step_data.get("step_id", 1)
+
 
             # Merge any explicit parameters with context from previous step
             step_params = step_data.get("parameters", {}) or {}
@@ -1269,11 +1282,15 @@ class TaskOrchestrator:
                 task["message"] = "No executable plan steps found for this task."
             return task
 
+        for step_index, step_data in enumerate(steps):
+            # Update current step index in task
+            task["current_step_index"] = step_index
         for step_idx, step_data in enumerate(steps):
             task["current_step_index"] = step_idx
             action_name = step_data.get("action", "")
             target = step_data.get("target", "")
             step_id = step_data.get("step_id", 1)
+
 
             auth_dict = task.get("authorization")
             if auth_dict and auth_dict.get("permission_status") == "granted":
