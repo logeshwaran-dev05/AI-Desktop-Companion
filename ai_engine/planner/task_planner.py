@@ -1164,4 +1164,32 @@ class TaskPlanner:
                 ],
             )
 
+        # 8. Generic "play <song/video>" without explicit platform ("on/in ...") -> default to YouTube
+        if not re.search(r"\s+(?:on|in)\s+[a-zA-Z0-9_\s]+$", text, re.IGNORECASE):
+            play_only = re.match(
+                r"^(?:(?:please|can you|could you)\s+)?(?:play|stream|listen\s+to)\s+(.+)$",
+                text,
+                re.IGNORECASE,
+            )
+            if play_only:
+                query = play_only.group(1).strip().rstrip("?.!,")
+                if query:
+                    return self._response(
+                        intent="search_web_app",
+                        status="plan_ready",
+                        message=f"Play '{query}' on YouTube ready.",
+                        application="YouTube",
+                        parameters={"query": query},
+                        steps=[
+                            PlanStep(
+                                step_id=1,
+                                action="search_web_app",
+                                target="youtube",
+                                depends_on=[],
+                                expected_outcome=f"Play '{query}' on YouTube.",
+                                parameters={"query": query},
+                            )
+                        ],
+                    )
+
         return None

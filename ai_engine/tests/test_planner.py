@@ -661,6 +661,13 @@ class TestTaskPlanner(unittest.TestCase):
         )
         self.assertEqual(res_missing.status, "clarification_required")
 
+    def test_generic_play_song_defaults_to_youtube(self):
+        res = self.planner.process_command(CommandRequest(text="play believer song"))
+        self.assertEqual(res.status, "plan_ready")
+        self.assertEqual(res.intent, "search_web_app")
+        self.assertEqual(res.steps[0].target, "youtube")
+        self.assertEqual(res.steps[0].parameters["query"], "believer song")
+
 
 if __name__ == "__main__":
     unittest.main()
